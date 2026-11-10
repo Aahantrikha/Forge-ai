@@ -1,5 +1,8 @@
 /// <reference types="vite-plugin-electron/electron-env" />
 
+// NOTE: the renderer no longer receives `window.ipcRenderer`.
+// The typed bridge is `window.forgeAI` (declared in src/vite-env.d.ts).
+
 declare namespace NodeJS {
   interface ProcessEnv {
     /**
@@ -11,7 +14,7 @@ declare namespace NodeJS {
      * │ │
      * │ ├─┬ dist-electron
      * │ │ ├── main.js
-     * │ │ └── preload.js
+     * │ │ └── preload.mjs
      * │
      * ```
      */
@@ -19,9 +22,4 @@ declare namespace NodeJS {
     /** /dist/ or /public/ */
     VITE_PUBLIC: string
   }
-}
-
-// Used in Renderer process, expose in `preload.ts`
-interface Window {
-  ipcRenderer: import('electron').IpcRenderer
 }

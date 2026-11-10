@@ -1,7 +1,9 @@
 {
   "name": "forge-ai",
+  "productName": "Forge AI",
+  "description": "Local-first, open-source desktop AI coding environment for Windows",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
