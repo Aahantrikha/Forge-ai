@@ -12,14 +12,17 @@ interface SidebarProps {
 
 /** Contextual sidebar: content is owned by each view module and rendered by view id. */
 export function Sidebar({ view, onNewChat }: SidebarProps) {
-  switch (view) {
-    case 'chat':
-      return <ChatSidebar onNewChat={onNewChat} />
-    case 'workspace':
-      return <WorkspaceSidebar />
-    case 'history':
-      return <HistorySidebar />
-    case 'settings':
-      return <SettingsSidebar />
-  }
+  return (
+    <div className="sidebar">
+      {view === 'chat' ? (
+        <ChatSidebar onNewChat={onNewChat} />
+      ) : view === 'workspace' ? (
+        <WorkspaceSidebar />
+      ) : view === 'history' ? (
+        <HistorySidebar />
+      ) : (
+        <SettingsSidebar />
+      )}
+    </div>
+  )
 }
