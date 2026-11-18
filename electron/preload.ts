@@ -1,7 +1,17 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import { IpcChannels } from '../src/shared/ipc'
-import type { FileChangeEvent, ForgeApi } from '../src/shared/ipc'
+import type {
+  AgentAuthStatus,
+  AgentEvent,
+  AgentId,
+  AgentModel,
+  AgentSession,
+  CreateSessionOptions,
+  FileChangeEvent,
+  ForgeApi,
+  SubmitPromptOptions,
+} from '../src/shared/ipc'
 
 /**
  * Security boundary (Forge AI spec §9).
@@ -47,6 +57,25 @@ const api: ForgeApi = {
       ipcRenderer.on(IpcChannels.menuOpenFile, wrapped)
       return () => {
         ipcRenderer.off(IpcChannels.menuOpenFile, wrapped)
+      }
+    },
+  },
+  agent: {
+    checkAuth: (agentId: AgentId): Promise<AgentAuthStatus> =>
+      ipcRenderer.invoke(IpcChannels.agentCheckAuth, agentId),
+    listModels: (agentId: AgentId): Promise<AgentModel[]> =>
+      ipcRenderer.invoke(IpcChannels.agentListModels, agentId),
+    createSession: (agentId: AgentId, options: CreateSessionOptions): Promise<AgentSession> =>
+      ipcRenderer.invoke(IpcChannels.agentCreateSession, agentId, options),
+    submitPrompt: (agentId: AgentId, options: SubmitPromptOptions): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.agentSubmitPrompt, agentId, options),
+    cancel: (agentId: AgentId, sessionId: string, workspacePath?: string): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.agentCancel, agentId, sessionId, workspacePath),
+    onEvent: (listener: (event: AgentEvent) => void) => {
+      const wrapped = (_event: IpcRendererEvent, event: AgentEvent) => listener(event)
+      ipcRenderer.on(IpcChannels.agentEvent, wrapped)
+      return () => {
+        ipcRenderer.off(IpcChannels.agentEvent, wrapped)
       }
     },
   },

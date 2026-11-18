@@ -182,7 +182,13 @@ export default function App() {
         ) : null}
         <main className="view-host">
           {view === 'chat' ? (
-            <ChatView key={sessionKey} selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent} />
+            <ChatView
+              key={sessionKey}
+              selectedAgent={selectedAgent}
+              onSelectAgent={setSelectedAgent}
+              workspace={workspace}
+              onOpenFolder={handleOpenFolder}
+            />
           ) : null}
           {view === 'workspace' ? (
             <WorkspaceView

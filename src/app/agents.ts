@@ -32,7 +32,7 @@ export const AGENTS: readonly AgentDescriptor[] = [
     id: 'opencode',
     name: 'OpenCode',
     integration: 'OpenCode TypeScript SDK',
-    status: 'planned',
+    status: 'available',
     needsApiKey: false,
     plannedMilestone: 'Milestone 3',
     notes: 'Provider auth and model selection via the SDK; free models clearly separated from paid ones.',

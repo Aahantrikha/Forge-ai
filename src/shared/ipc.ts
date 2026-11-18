@@ -14,12 +14,36 @@
  */
 
 import type {
+  AgentAuthStatus,
+  AgentEvent,
+  AgentId,
+  AgentModel,
+  AgentSession,
+  CreateSessionOptions,
+  SubmitPromptOptions,
+} from './agent'
+import type {
   FileChangeEvent,
   FileTreeNode,
   OpenedFile,
   WorkspaceInfo,
   WorkspaceOpenResult,
 } from './workspace'
+
+export type {
+  AgentAuthStatus,
+  AgentCapabilities,
+  AgentEvent,
+  AgentId,
+  AgentModel,
+  AgentModelCost,
+  AgentSession,
+  AgentToolActivity,
+  AuthState,
+  CreateSessionOptions,
+  SubmitPromptOptions,
+  ToolType,
+} from './agent'
 
 export type {
   FileChangeEvent,
@@ -47,6 +71,14 @@ export const IpcChannels = {
   // Native application menu events
   menuOpenFolder: 'forge:menu:open-folder',
   menuOpenFile: 'forge:menu:open-file',
+
+  // Agent channels (Milestone 3: OpenCode & Agent Abstraction)
+  agentCheckAuth: 'forge:agent:check-auth',
+  agentListModels: 'forge:agent:list-models',
+  agentCreateSession: 'forge:agent:create-session',
+  agentSubmitPrompt: 'forge:agent:submit-prompt',
+  agentCancel: 'forge:agent:cancel',
+  agentEvent: 'forge:agent:event',
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -89,5 +121,14 @@ export interface ForgeApi {
     onMenuOpenFolder(listener: () => void): () => void
     /** Subscribe to native menu File > Open File; returns an unsubscribe function. */
     onMenuOpenFile(listener: () => void): () => void
+  }
+  agent: {
+    checkAuth(agentId: AgentId): Promise<AgentAuthStatus>
+    listModels(agentId: AgentId): Promise<AgentModel[]>
+    createSession(agentId: AgentId, options: CreateSessionOptions): Promise<AgentSession>
+    submitPrompt(agentId: AgentId, options: SubmitPromptOptions): Promise<void>
+    cancel(agentId: AgentId, sessionId: string, workspacePath?: string): Promise<void>
+    /** Subscribe to agent events (text deltas, real tool activity, file changes, done, error). */
+    onEvent(listener: (event: AgentEvent) => void): () => void
   }
 }

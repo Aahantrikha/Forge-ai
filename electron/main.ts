@@ -3,7 +3,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { IpcChannels, type AppInfo } from '../src/shared/ipc'
+import type { AgentId, CreateSessionOptions, SubmitPromptOptions } from '../src/shared/agent'
 import { WorkspaceService } from './workspace'
+import { AgentService } from './agent-service'
 
 const logPath = path.join(app.getPath('userData'), 'electron-debug.log')
 try {
@@ -55,6 +57,7 @@ const SECURITY_STATUS: AppInfo['security'] = {
 
 let win: BrowserWindow | null = null
 const workspaceService = new WorkspaceService(() => win)
+const agentService = new AgentService(() => win)
 
 function registerIpcHandlers() {
   // Application info (used by the settings screen + status bar).
@@ -74,6 +77,19 @@ function registerIpcHandlers() {
   ipcMain.handle(IpcChannels.workspaceGetCurrent, () => workspaceService.getWorkspaceInfo())
   ipcMain.handle(IpcChannels.workspaceSetCurrent, (_event, dirPath: string) => workspaceService.setCurrent(dirPath))
   ipcMain.handle(IpcChannels.workspaceGetTree, (_event, customRoot?: string) => workspaceService.getTree(customRoot))
+
+  // Agent controls (Milestone 3 - Unified Agent Abstraction & OpenCode)
+  ipcMain.handle(IpcChannels.agentCheckAuth, (_event, agentId: AgentId) => agentService.checkAuth(agentId))
+  ipcMain.handle(IpcChannels.agentListModels, (_event, agentId: AgentId) => agentService.listModels(agentId))
+  ipcMain.handle(IpcChannels.agentCreateSession, (_event, agentId: AgentId, options: CreateSessionOptions) =>
+    agentService.createSession(agentId, options)
+  )
+  ipcMain.handle(IpcChannels.agentSubmitPrompt, (_event, agentId: AgentId, options: SubmitPromptOptions) =>
+    agentService.submitPrompt(agentId, options)
+  )
+  ipcMain.handle(IpcChannels.agentCancel, (_event, agentId: AgentId, sessionId: string, workspacePath?: string) =>
+    agentService.cancel(agentId, sessionId, workspacePath)
+  )
 }
 
 function setupApplicationMenu() {
@@ -224,6 +240,7 @@ function createWindow() {
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
   workspaceService.dispose()
+  void agentService.dispose()
   if (process.platform !== 'darwin') {
     app.quit()
     win = null
