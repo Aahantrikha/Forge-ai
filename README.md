@@ -6,24 +6,30 @@ using your existing subscriptions — no extra API credits or AI editor subscrip
 
 Stack: Electron + React + TypeScript (Vite).
 
-## Status — Milestone 1: Desktop UI shell + security foundation
+## Status — Milestone 2: Workspace & Project Management (Current)
 
-Implemented in this milestone:
+Implemented milestones:
 
-- Electron security hardening: `contextIsolation: true`, `nodeIntegration: false`,
-  `worker` Node disabled, `sandbox: true`, navigation/popup guards, dev-only menu.
-- Typed, whitelisted IPC: the renderer has **no** raw `ipcRenderer` access. The full
-  channel whitelist lives in `src/shared/ipc.ts` (`IpcChannels`), bridged as
-  `window.forgeAI` by `electron/preload.ts`.
-- Build-time CSP injection (strict policy in production; dev allowances never ship).
-- Desktop shell: frameless custom title bar, activity rail, contextual sidebar,
-  status bar, and the chat / workspace / history / settings views with navigation.
-- Agent selector UI backed by `src/app/agents.ts` — all integrations honestly report
-  `planned` status. No mock agent responses, no simulated activity.
+- **Milestone 1 (Desktop UI Shell & Security Foundation)**:
+  - Electron security hardening: `contextIsolation: true`, `nodeIntegration: false`,
+    `worker` Node disabled, `sandbox: true`, navigation/popup guards, dev-only menu.
+  - Typed, whitelisted IPC: the renderer has **no** raw `ipcRenderer` access. The full
+    channel whitelist lives in `src/shared/ipc.ts` (`IpcChannels`), bridged as
+    `window.forgeAI` by `electron/preload.ts`.
+  - Build-time CSP injection (strict policy in production; dev allowances never ship).
+  - Desktop shell: frameless custom title bar, activity rail, contextual sidebar,
+    status bar, and the chat / workspace / history / settings views with navigation.
+  - Agent selector UI backed by `src/app/agents.ts`.
 
-Not implemented yet (by design):
+- **Milestone 2 (Workspace & Project Management)**:
+  - Native directory picker with directory traversal protections and sandboxing.
+  - Real-time collapsible file tree with extension-based color coding.
+  - Live filesystem watching (`fs.watch`) with automatic UI tree refresh on file edits.
+  - Recent workspaces management with instant project switching.
+  - Interactive file metadata viewer.
 
-- Workspace management (Milestone 2): open/create/switch projects, file tree.
+Next milestones:
+
 - Agent integrations (Milestones 3–5): OpenCode SDK, Codex App Server, Antigravity CLI.
 - Streaming, permissions, terminal (Milestone 6); diff viewer & git (7); SQLite
   persistence (8); multi-agent orchestration (9); packaging & release (10).

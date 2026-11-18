@@ -23,7 +23,7 @@ const isDevelopment = !!VITE_DEV_SERVER_URL
 export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
-process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
+process.env.VITE_PUBLIC = path.join(process.env.APP_ROOT, 'public')
 
 /**
  * Security posture (Forge AI spec §9), configured ONCE and reported verbatim
@@ -72,15 +72,18 @@ function registerIpcHandlers() {
 }
 
 function createWindow() {
+  const iconPath = path.join(process.env.APP_ROOT, 'public', 'forge.svg')
+
   win = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1080,
     minHeight: 680,
     frame: false, // custom titlebar below (frameless window)
-    show: false,
+    show: true,
+    center: true,
     backgroundColor: '#0e1013',
-    icon: path.join(process.env.VITE_PUBLIC, 'forge.svg'),
+    icon: iconPath,
     title: 'Forge AI',
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
@@ -92,7 +95,13 @@ function createWindow() {
     },
   })
 
-  win.once('ready-to-show', () => win?.show())
+  win.center()
+  win.setAlwaysOnTop(true)
+  win.show()
+  win.focus()
+  setTimeout(() => {
+    win?.setAlwaysOnTop(false)
+  }, 1000)
 
   win.on('maximize', () => sendMaximized(true))
   win.on('unmaximize', () => sendMaximized(false))
@@ -100,6 +109,15 @@ function createWindow() {
   // Navigation guards (§9): no popups, no in-page navigation to remote pages.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (event) => event.preventDefault())
+
+  win.webContents.on('did-finish-load', () => {
+    win?.show()
+    win?.focus()
+  })
+
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    console.error(`Page failed to load (${errorCode}): ${errorDescription}`)
+  })
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
