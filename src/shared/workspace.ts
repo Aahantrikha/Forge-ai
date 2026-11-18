@@ -18,19 +18,30 @@ export interface FileTreeNode {
   extension?: string
 }
 
-export interface OpenedFile {
+export interface FileState {
   path: string
+  size: number
+  mtimeMs: number
+  hash: string
+}
+
+export interface OpenedFile extends FileState {
   name: string
   relativePath: string
   content: string
-  size: number
   extension: string
   lineCount: number
+  readable: boolean
 }
 
 export interface WorkspaceOpenResult {
   workspace: WorkspaceInfo
   tree: FileTreeNode
+}
+
+export interface WorkspaceEntry {
+  path: string
+  type: 'file' | 'directory'
 }
 
 export type FileChangeType = 'add' | 'change' | 'unlink' | 'addDir' | 'unlinkDir'
@@ -40,3 +51,23 @@ export interface FileChangeEvent {
   path: string
   relativePath: string
 }
+
+export type WorkspaceErrorCode =
+  | 'NO_WORKSPACE'
+  | 'PATH_OUTSIDE_WORKSPACE'
+  | 'NOT_FOUND'
+  | 'ALREADY_EXISTS'
+  | 'INVALID_NAME'
+  | 'INVALID_TARGET'
+  | 'CONFLICT'
+  | 'PERMISSION_DENIED'
+  | 'IO_ERROR'
+
+export interface WorkspaceErrorInfo {
+  code: WorkspaceErrorCode
+  message: string
+  path?: string
+  current?: FileState
+}
+
+export type WorkspaceResult<T> = { ok: true; value: T } | { ok: false; error: WorkspaceErrorInfo }

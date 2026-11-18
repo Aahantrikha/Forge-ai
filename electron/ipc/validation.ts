@@ -3,10 +3,18 @@ import { z } from 'zod'
 export const FilePathSchema = z.string().min(1)
 export const FileContentSchema = z.string()
 export const DirectoryPathSchema = z.string().min(1)
+export const FileNameSchema = z.string().min(1).max(255)
+export const FileStateSchema = z.object({
+  path: z.string().min(1),
+  size: z.number().nonnegative(),
+  mtimeMs: z.number().nonnegative(),
+  hash: z.string().min(1),
+})
 export const SessionIdSchema = z.string().min(1)
 export const PromptSchema = z.string().min(1)
 
 export const ProviderIdArgSchema = z.enum(['opencode', 'codex', 'gemini'])
+export const EntryTypeArgSchema = z.enum(['file', 'directory'])
 
 export const CreateSessionOptionsSchema = z.object({
   workspacePath: DirectoryPathSchema,
@@ -23,7 +31,11 @@ export const SubmitPromptOptionsSchema = z.object({
 
 export const IpcArgs = {
   readFile: z.tuple([FilePathSchema]),
-  saveFile: z.tuple([FilePathSchema, FileContentSchema]),
+  saveFile: z.tuple([FilePathSchema, FileContentSchema, FileStateSchema.optional()]),
+  getFileState: z.tuple([FilePathSchema]),
+  createEntry: z.tuple([DirectoryPathSchema, FileNameSchema, EntryTypeArgSchema]),
+  renameEntry: z.tuple([FilePathSchema, FileNameSchema]),
+  deleteEntry: z.tuple([FilePathSchema]),
   setCurrent: z.tuple([DirectoryPathSchema]),
   getTree: z.tuple([DirectoryPathSchema.optional()]),
   checkAuth: z.tuple([ProviderIdArgSchema]),

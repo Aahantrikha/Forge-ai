@@ -1,28 +1,45 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { FileTreeNode, OpenedFile, WorkspaceInfo } from '../shared/workspace'
+import { useRef, useState } from 'react'
+import type {
+  FileState,
+  FileTreeNode,
+  OpenedFile,
+  WorkspaceEntry,
+  WorkspaceInfo,
+  WorkspaceResult,
+} from '../shared/workspace'
 import { EmptyState } from '../components/EmptyState'
 import {
+  AlertIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CloseIcon,
   CopyIcon,
   FileIcon,
+  FilePlusIcon,
   FolderIcon,
   FolderPlusIcon,
+  PencilIcon,
   RefreshIcon,
+  TrashIcon,
 } from '../components/icons'
 
 export interface WorkspaceViewProps {
   workspace: WorkspaceInfo | null
   tree: FileTreeNode | null
   activeFile: OpenedFile | null
+  content: string
+  isDirty: boolean
+  savePhase: 'idle' | 'saving' | 'saved' | 'error'
+  externalConflict: FileState | null
   loading: boolean
   onOpenFolder: () => Promise<void>
   onOpenFile: () => Promise<void>
   onSelectFile: (node: FileTreeNode) => Promise<void>
   onCloseFile: () => void
-  onSaveFile?: (filePath: string, content: string) => Promise<OpenedFile | null>
+  onContentChange: (content: string) => void
+  onSaveFile?: (filePath: string, content: string, options?: { overwrite?: boolean }) => Promise<WorkspaceResult<OpenedFile>>
+  onReloadFile: () => Promise<void>
   onRefreshTree: () => Promise<void>
   onSwitchWorkspace: (path: string) => Promise<void>
 }
@@ -67,19 +84,23 @@ function getFileBadgeColor(ext?: string): string {
   }
 }
 
-/** Main workspace view: displays active file content or workspace overview. */
 export function WorkspaceView({
   workspace,
   tree,
   activeFile,
+  content,
+  isDirty,
+  savePhase,
+  externalConflict,
   loading,
   onOpenFolder,
   onOpenFile,
   onCloseFile,
+  onContentChange,
   onSaveFile,
+  onReloadFile,
   onSwitchWorkspace,
 }: WorkspaceViewProps) {
-  // Count files & folders
   let fileCount = 0
   let dirCount = 0
   if (tree) {
@@ -108,12 +129,7 @@ export function WorkspaceView({
           )}
         </div>
         <div className="view-header-actions">
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={onOpenFile}
-            title="Open a single file (Ctrl+Shift+O)"
-          >
+          <button type="button" className="btn btn-sm" onClick={onOpenFile} title="Open a single file (Ctrl+Shift+O)">
             <FileIcon size={14} />
             Open File
           </button>
@@ -130,7 +146,17 @@ export function WorkspaceView({
       </header>
 
       {activeFile ? (
-        <FileContentViewer file={activeFile} onClose={onCloseFile} onSaveFile={onSaveFile} />
+        <FileContentViewer
+          file={activeFile}
+          content={content}
+          isDirty={isDirty}
+          savePhase={savePhase}
+          externalConflict={externalConflict}
+          onClose={onCloseFile}
+          onContentChange={onContentChange}
+          onSaveFile={onSaveFile}
+          onReload={onReloadFile}
+        />
       ) : workspace ? (
         <div className="centered-content">
           <div className="panel project-launcher">
@@ -142,9 +168,7 @@ export function WorkspaceView({
               {workspace.path}
             </p>
             <p className="launcher-hint">
-              {loading
-                ? 'Loading files…'
-                : `${fileCount} files, ${dirCount} folders indexed in workspace.`}
+              {loading ? 'Loading files…' : `${fileCount} files, ${dirCount} folders indexed in workspace.`}
             </p>
             <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
               <button type="button" className="btn btn-sm" onClick={onOpenFile}>
@@ -161,28 +185,26 @@ export function WorkspaceView({
             </p>
           </div>
 
-          {workspace.recentPaths.filter((p) => p !== workspace.path).length > 0 ? (
+          {workspace.recentPaths.filter((path) => path !== workspace.path).length > 0 ? (
             <div className="feature-list" style={{ marginTop: '12px' }}>
               <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
                 RECENT WORKSPACES
               </div>
               {workspace.recentPaths
-                .filter((p) => p !== workspace.path)
+                .filter((path) => path !== workspace.path)
                 .slice(0, 3)
-                .map((p) => {
-                  const base = p.split(/[/\\]/).filter(Boolean).pop() || p
+                .map((path) => {
+                  const base = path.split(/[/\\]/).filter(Boolean).pop() || path
                   return (
                     <li
-                      key={p}
+                      key={path}
                       style={{ cursor: 'pointer' }}
-                      onClick={() => void onSwitchWorkspace(p)}
-                      title={`Switch to ${p}`}
+                      onClick={() => void onSwitchWorkspace(path)}
+                      title={`Switch to ${path}`}
                     >
                       <FeatureBullet />
                       <span>{base}</span>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-                        {p}
-                      </span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>{path}</span>
                     </li>
                   )
                 })}
@@ -241,30 +263,33 @@ function FeatureBullet() {
   return <span className="feature-dot" aria-hidden="true" />
 }
 
-/** Interactive code editor and file viewer with line numbers, tab support, and Save capability. */
 function FileContentViewer({
   file,
+  content,
+  isDirty,
+  savePhase,
+  externalConflict,
   onClose,
+  onContentChange,
   onSaveFile,
+  onReload,
 }: {
   file: OpenedFile
+  content: string
+  isDirty: boolean
+  savePhase: 'idle' | 'saving' | 'saved' | 'error'
+  externalConflict: FileState | null
   onClose: () => void
-  onSaveFile?: (filePath: string, content: string) => Promise<OpenedFile | null>
+  onContentChange: (content: string) => void
+  onSaveFile?: (filePath: string, content: string, options?: { overwrite?: boolean }) => Promise<WorkspaceResult<OpenedFile>>
+  onReload: () => Promise<void>
 }) {
-  const [content, setContent] = useState(file.content)
-  const [isSaving, setIsSaving] = useState(false)
-  const [saveSuccess, setSaveSuccess] = useState(false)
   const [copied, setCopied] = useState(false)
   const editorRef = useRef<HTMLTextAreaElement | null>(null)
   const linesRef = useRef<HTMLDivElement | null>(null)
 
-  useEffect(() => {
-    setContent(file.content)
-    setSaveSuccess(false)
-  }, [file.path, file.content])
-
-  const isDirty = content !== file.content
   const lines = content.split('\n')
+  const isSaving = savePhase === 'saving'
 
   const handleScroll = () => {
     if (editorRef.current && linesRef.current) {
@@ -272,57 +297,16 @@ function FileContentViewer({
     }
   }
 
-  const handleSave = useCallback(async () => {
-    if (!onSaveFile || !isDirty || isSaving) return
-    setIsSaving(true)
-    try {
-      const updated = await onSaveFile(file.path, content)
-      if (updated) {
-        setSaveSuccess(true)
-        setTimeout(() => setSaveSuccess(false), 2000)
-      }
-    } finally {
-      setIsSaving(false)
-    }
-  }, [content, file.path, isDirty, isSaving, onSaveFile])
-
-  // Global Ctrl+S and native menu File > Save listener
-  useEffect(() => {
-    const handleGlobalSave = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-        e.preventDefault()
-        void handleSave()
-      }
-    }
-    const handleMenuSave = () => {
-      void handleSave()
-    }
-    window.addEventListener('keydown', handleGlobalSave)
-    window.addEventListener('forge:save-active-file', handleMenuSave)
-    return () => {
-      window.removeEventListener('keydown', handleGlobalSave)
-      window.removeEventListener('forge:save-active-file', handleMenuSave)
-    }
-  }, [handleSave])
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-      e.preventDefault()
-      void handleSave()
-      return
-    }
-
-    if (e.key === 'Tab') {
-      e.preventDefault()
-      const target = e.currentTarget
-      const start = target.selectionStart
-      const end = target.selectionEnd
-      const newContent = content.substring(0, start) + '  ' + content.substring(end)
-      setContent(newContent)
-      requestAnimationFrame(() => {
-        target.selectionStart = target.selectionEnd = start + 2
-      })
-    }
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Tab') return
+    event.preventDefault()
+    const target = event.currentTarget
+    const start = target.selectionStart
+    const end = target.selectionEnd
+    onContentChange(content.substring(0, start) + '  ' + content.substring(end))
+    requestAnimationFrame(() => {
+      target.selectionStart = target.selectionEnd = start + 2
+    })
   }
 
   const handleCopy = () => {
@@ -330,9 +314,6 @@ function FileContentViewer({
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
-
-  const isBinaryOrLarge =
-    file.content.startsWith('/* File is larger') || file.content.startsWith('/* Binary file')
 
   return (
     <div className="file-viewer-container">
@@ -347,34 +328,45 @@ function FileContentViewer({
           </span>
           <span className="badge badge-planned">{formatBytes(file.size)}</span>
           <span className="badge badge-planned">{lines.length} lines</span>
-          {isDirty && (
+          {isDirty ? (
             <span className="badge-modified" title="Unsaved changes (Press Ctrl+S to save)">
               <span className="badge-modified-dot" />
               Modified
             </span>
-          )}
+          ) : null}
         </div>
         <div className="file-viewer-actions">
-          {!isBinaryOrLarge && onSaveFile && (
+          {file.readable && onSaveFile ? (
             <button
               type="button"
               className={`btn btn-sm${isDirty ? ' btn-primary' : ''}`}
-              disabled={!isDirty || isSaving}
-              onClick={() => void handleSave()}
+              disabled={!isDirty || isSaving || !!externalConflict}
+              onClick={() => void onSaveFile(file.path, content)}
               title="Save changes (Ctrl+S)"
             >
               {isSaving ? (
                 <span>Saving…</span>
-              ) : saveSuccess ? (
+              ) : savePhase === 'saved' ? (
                 <>
                   <CheckIcon size={13} />
                   <span>Saved!</span>
+                </>
+              ) : savePhase === 'error' ? (
+                <>
+                  <AlertIcon size={13} />
+                  <span>Save failed</span>
                 </>
               ) : (
                 <span>Save</span>
               )}
             </button>
-          )}
+          ) : null}
+          {file.readable ? (
+            <button type="button" className="btn btn-sm" onClick={() => void onReload()} title="Reload from disk">
+              <RefreshIcon size={13} />
+              Reload
+            </button>
+          ) : null}
           <button type="button" className="btn btn-sm" onClick={handleCopy} title="Copy file contents">
             {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
             {copied ? 'Copied!' : 'Copy'}
@@ -390,28 +382,48 @@ function FileContentViewer({
           </button>
         </div>
       </div>
+
+      {externalConflict ? (
+        <div className="file-conflict" role="alert">
+          <AlertIcon size={14} />
+          <span>This file changed on disk. Reload to see the saved version or overwrite it deliberately.</span>
+          <button type="button" className="btn btn-sm" onClick={() => void onReload()}>
+            Reload from disk
+          </button>
+          {onSaveFile ? (
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={() => void onSaveFile(file.path, content, { overwrite: true })}
+            >
+              Overwrite anyway
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="file-viewer-code-wrap">
         <div ref={linesRef} className="file-viewer-lines" aria-hidden="true" style={{ overflow: 'hidden' }}>
-          {lines.map((_, i) => (
-            <div key={i} className="line-number">
-              {i + 1}
+          {lines.map((_, index) => (
+            <div key={index} className="line-number">
+              {index + 1}
             </div>
           ))}
         </div>
-        {isBinaryOrLarge ? (
-          <pre className="file-viewer-code">
-            <code>{file.content}</code>
-          </pre>
-        ) : (
+        {file.readable ? (
           <textarea
             ref={editorRef}
             className="file-viewer-editor"
             value={content}
             spellCheck={false}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={(event) => onContentChange(event.target.value)}
             onKeyDown={handleKeyDown}
             onScroll={handleScroll}
           />
+        ) : (
+          <pre className="file-viewer-code">
+            <code>{file.content}</code>
+          </pre>
         )}
       </div>
     </div>
@@ -428,9 +440,11 @@ export interface WorkspaceSidebarProps {
   onSelectFile: (node: FileTreeNode) => Promise<void>
   onRefreshTree: () => Promise<void>
   onSwitchWorkspace: (path: string) => Promise<void>
+  onCreateEntry: (parentPath: string, name: string, type: 'file' | 'directory') => Promise<WorkspaceResult<WorkspaceEntry> | null>
+  onRenameEntry: (entryPath: string, newName: string) => Promise<WorkspaceResult<WorkspaceEntry> | null>
+  onDeleteEntry: (entryPath: string) => Promise<void>
 }
 
-/** Sidebar for the workspace view: renders the interactive File Tree in the sidebar. */
 export function WorkspaceSidebar({
   workspace,
   tree,
@@ -441,23 +455,34 @@ export function WorkspaceSidebar({
   onSelectFile,
   onRefreshTree,
   onSwitchWorkspace,
+  onCreateEntry,
+  onRenameEntry,
+  onDeleteEntry,
 }: WorkspaceSidebarProps) {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => {
-    const s = new Set<string>()
-    if (tree?.path) s.add(tree.path)
-    return s
+    const set = new Set<string>()
+    if (tree?.path) set.add(tree.path)
+    return set
   })
 
   const toggleDirectory = (nodePath: string) => {
-    setExpandedDirs((prev) => {
-      const next = new Set(prev)
-      if (next.has(nodePath)) {
-        next.delete(nodePath)
-      } else {
-        next.add(nodePath)
-      }
+    setExpandedDirs((previous) => {
+      const next = new Set(previous)
+      if (next.has(nodePath)) next.delete(nodePath)
+      else next.add(nodePath)
       return next
     })
+  }
+
+  const promptCreate = (type: 'file' | 'directory') => {
+    if (!workspace) return
+    const name = window.prompt(type === 'file' ? 'New file name' : 'New folder name')
+    if (name?.trim()) void onCreateEntry(tree?.path ?? workspace.path, name.trim(), type)
+  }
+
+  const promptRename = (node: FileTreeNode) => {
+    const name = window.prompt(`Rename ${node.type}`, node.name)
+    if (name?.trim()) void onRenameEntry(node.path, name.trim())
   }
 
   return (
@@ -465,6 +490,28 @@ export function WorkspaceSidebar({
       <div className="sidebar-header">
         <span className="sidebar-title">Explorer</span>
         <div className="sidebar-header-buttons">
+          {workspace ? (
+            <>
+              <button
+                type="button"
+                className="icon-btn-sm"
+                onClick={() => promptCreate('file')}
+                title="New File"
+                aria-label="New File"
+              >
+                <FilePlusIcon size={14} />
+              </button>
+              <button
+                type="button"
+                className="icon-btn-sm"
+                onClick={() => promptCreate('directory')}
+                title="New Folder"
+                aria-label="New Folder"
+              >
+                <FolderPlusIcon size={14} />
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
             className="icon-btn-sm"
@@ -517,6 +564,8 @@ export function WorkspaceSidebar({
                   selectedPath={activeFile?.path ?? null}
                   onToggleDir={toggleDirectory}
                   onSelectFile={onSelectFile}
+                  onRename={promptRename}
+                  onDelete={(node) => void onDeleteEntry(node.path)}
                 />
               ) : (
                 <div className="tree-empty">Empty directory</div>
@@ -578,6 +627,8 @@ interface SidebarTreeNodeProps {
   selectedPath: string | null
   onToggleDir: (path: string) => void
   onSelectFile: (node: FileTreeNode) => void
+  onRename: (node: FileTreeNode) => void
+  onDelete: (node: FileTreeNode) => void
 }
 
 function SidebarTreeNode({
@@ -587,62 +638,78 @@ function SidebarTreeNode({
   selectedPath,
   onToggleDir,
   onSelectFile,
+  onRename,
+  onDelete,
 }: SidebarTreeNodeProps) {
   const isDirectory = node.type === 'directory'
   const isExpanded = expandedDirs.has(node.path)
   const isSelected = selectedPath === node.path
 
-  if (isDirectory) {
-    return (
-      <div className="tree-node-group">
+  return (
+    <div className="tree-node-group">
+      <div className="tree-row" style={{ paddingLeft: `${depth * 12}px` }}>
         <button
           type="button"
-          className={`tree-item dir-item${isSelected ? ' is-selected' : ''}`}
-          style={{ paddingLeft: `${depth * 12 + 6}px` }}
-          onClick={() => onToggleDir(node.path)}
+          className={`tree-item${isDirectory ? ' dir-item' : ' file-item'}${isSelected ? ' is-selected' : ''}`}
+          onClick={() => (isDirectory ? onToggleDir(node.path) : onSelectFile(node))}
+          title={isDirectory ? node.name : `${node.name} (${formatBytes(node.size)})`}
         >
-          <span className="tree-chevron">
-            {isExpanded ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
-          </span>
-          <span className="tree-icon dir-icon">
-            <FolderIcon size={13} />
+          {isDirectory ? (
+            <span className="tree-chevron">
+              {isExpanded ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+            </span>
+          ) : (
+            <span className="tree-chevron spacer" />
+          )}
+          <span className={`tree-icon${isDirectory ? ' dir-icon' : ' file-icon'}`}>
+            {isDirectory ? (
+              <FolderIcon size={13} />
+            ) : (
+              <span style={{ color: getFileBadgeColor(node.extension) }}>
+                <FileIcon size={13} />
+              </span>
+            )}
           </span>
           <span className="tree-label">{node.name}</span>
         </button>
-        {isExpanded && node.children && node.children.length > 0 ? (
-          <div className="tree-children">
-            {node.children.map((child) => (
-              <SidebarTreeNode
-                key={child.path}
-                node={child}
-                depth={depth + 1}
-                expandedDirs={expandedDirs}
-                selectedPath={selectedPath}
-                onToggleDir={onToggleDir}
-                onSelectFile={onSelectFile}
-              />
-            ))}
-          </div>
-        ) : null}
+        <span className="tree-row-actions">
+          <button
+            type="button"
+            className="tree-action"
+            onClick={() => onRename(node)}
+            title={`Rename ${node.name}`}
+            aria-label={`Rename ${node.name}`}
+          >
+            <PencilIcon size={12} />
+          </button>
+          <button
+            type="button"
+            className="tree-action tree-action-danger"
+            onClick={() => onDelete(node)}
+            title={`Delete ${node.name}`}
+            aria-label={`Delete ${node.name}`}
+          >
+            <TrashIcon size={12} />
+          </button>
+        </span>
       </div>
-    )
-  }
-
-  const badgeColor = getFileBadgeColor(node.extension)
-
-  return (
-    <button
-      type="button"
-      className={`tree-item file-item${isSelected ? ' is-selected' : ''}`}
-      style={{ paddingLeft: `${depth * 12 + 6}px` }}
-      onClick={() => onSelectFile(node)}
-      title={`${node.name} (${formatBytes(node.size)})`}
-    >
-      <span className="tree-chevron spacer" />
-      <span className="tree-icon file-icon" style={{ color: badgeColor }}>
-        <FileIcon size={13} />
-      </span>
-      <span className="tree-label">{node.name}</span>
-    </button>
+      {isDirectory && isExpanded && node.children && node.children.length > 0 ? (
+        <div className="tree-children">
+          {node.children.map((child) => (
+            <SidebarTreeNode
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              expandedDirs={expandedDirs}
+              selectedPath={selectedPath}
+              onToggleDir={onToggleDir}
+              onSelectFile={onSelectFile}
+              onRename={onRename}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
   )
 }

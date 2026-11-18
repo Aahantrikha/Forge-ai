@@ -58,7 +58,16 @@ const SECURITY_STATUS: AppInfo['security'] = {
 
 let win: BrowserWindow | null = null
 const forge = createForgeContext(app.getPath('userData'))
-const workspaceService = new WorkspaceService(() => win)
+const workspaceService = new WorkspaceService({
+  userDataPath: app.getPath('userData'),
+  getWindow: () => win,
+  dialogs: {
+    showOpenDialog: (options, parent) =>
+      parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options),
+    showMessageBox: (options, parent) =>
+      parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options),
+  },
+})
 const agentService = new AgentService(() => win)
 
 function registerIpcHandlers() {
@@ -79,8 +88,24 @@ function registerIpcHandlers() {
     return workspaceService.readFile(filePath)
   })
   ipcMain.handle(IpcChannels.workspaceSaveFile, (_event, ...args: unknown[]) => {
-    const [filePath, content] = validateArgs(IpcArgs.saveFile, args, IpcChannels.workspaceSaveFile)
-    return workspaceService.saveFile(filePath, content)
+    const [filePath, content, expected] = validateArgs(IpcArgs.saveFile, args, IpcChannels.workspaceSaveFile)
+    return workspaceService.saveFile(filePath, content, expected)
+  })
+  ipcMain.handle(IpcChannels.workspaceGetFileState, (_event, ...args: unknown[]) => {
+    const [filePath] = validateArgs(IpcArgs.getFileState, args, IpcChannels.workspaceGetFileState)
+    return workspaceService.getFileState(filePath)
+  })
+  ipcMain.handle(IpcChannels.workspaceCreateEntry, (_event, ...args: unknown[]) => {
+    const [parentPath, name, type] = validateArgs(IpcArgs.createEntry, args, IpcChannels.workspaceCreateEntry)
+    return workspaceService.createEntry(parentPath, name, type)
+  })
+  ipcMain.handle(IpcChannels.workspaceRenameEntry, (_event, ...args: unknown[]) => {
+    const [entryPath, newName] = validateArgs(IpcArgs.renameEntry, args, IpcChannels.workspaceRenameEntry)
+    return workspaceService.renameEntry(entryPath, newName)
+  })
+  ipcMain.handle(IpcChannels.workspaceDeleteEntry, (_event, ...args: unknown[]) => {
+    const [entryPath] = validateArgs(IpcArgs.deleteEntry, args, IpcChannels.workspaceDeleteEntry)
+    return workspaceService.deleteEntry(entryPath)
   })
   ipcMain.handle(IpcChannels.workspaceSelectDirectory, () => workspaceService.selectDirectory())
   ipcMain.handle(IpcChannels.workspaceGetCurrent, () => workspaceService.getWorkspaceInfo())

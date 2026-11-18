@@ -24,10 +24,13 @@ import type {
 } from './agent'
 import type {
   FileChangeEvent,
+  FileState,
   FileTreeNode,
   OpenedFile,
+  WorkspaceEntry,
   WorkspaceInfo,
   WorkspaceOpenResult,
+  WorkspaceResult,
 } from './workspace'
 
 export type {
@@ -48,10 +51,13 @@ export type {
 export type {
   FileChangeEvent,
   FileChangeType,
+  FileState,
   FileTreeNode,
   OpenedFile,
+  WorkspaceEntry,
   WorkspaceInfo,
   WorkspaceOpenResult,
+  WorkspaceResult,
 } from './workspace'
 
 /** Whitelisted channel names. Every value is used by an explicit handler. */
@@ -67,6 +73,10 @@ export const IpcChannels = {
   workspaceGetCurrent: 'forge:workspace:get-current',
   workspaceSetCurrent: 'forge:workspace:set-current',
   workspaceGetTree: 'forge:workspace:get-tree',
+  workspaceGetFileState: 'forge:workspace:get-file-state',
+  workspaceCreateEntry: 'forge:workspace:create-entry',
+  workspaceRenameEntry: 'forge:workspace:rename-entry',
+  workspaceDeleteEntry: 'forge:workspace:delete-entry',
   workspaceFileChanged: 'forge:workspace:file-changed',
 
   // Native application menu events
@@ -117,7 +127,11 @@ export interface ForgeApi {
     getTree(rootPath?: string): Promise<FileTreeNode | null>
     readDirectory(rootPath?: string): Promise<FileTreeNode | null>
     readFile(filePath: string): Promise<OpenedFile | null>
-    saveFile(filePath: string, content: string): Promise<OpenedFile | null>
+    saveFile(filePath: string, content: string, expected?: FileState): Promise<WorkspaceResult<OpenedFile>>
+    getFileState(filePath: string): Promise<WorkspaceResult<FileState>>
+    createEntry(parentPath: string, name: string, type: 'file' | 'directory'): Promise<WorkspaceResult<WorkspaceEntry>>
+    renameEntry(entryPath: string, newName: string): Promise<WorkspaceResult<WorkspaceEntry>>
+    deleteEntry(entryPath: string): Promise<WorkspaceResult<{ deleted: boolean }>>
     /** Subscribe to workspace file changes; returns an unsubscribe function. */
     onFileChanged(listener: (event: FileChangeEvent) => void): () => void
     /** Subscribe to native menu File > Open Folder; returns an unsubscribe function. */

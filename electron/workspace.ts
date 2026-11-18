@@ -1,13 +1,25 @@
-import { app, dialog, type BrowserWindow } from 'electron'
+import type {
+  BrowserWindow,
+  MessageBoxOptions,
+  MessageBoxReturnValue,
+  OpenDialogOptions,
+  OpenDialogReturnValue,
+} from 'electron'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { IpcChannels } from '../src/shared/ipc'
 import type {
   FileChangeEvent,
+  FileState,
   FileTreeNode,
   OpenedFile,
+  WorkspaceEntry,
+  WorkspaceErrorInfo,
+  WorkspaceErrorCode,
   WorkspaceInfo,
   WorkspaceOpenResult,
+  WorkspaceResult,
 } from '../src/shared/workspace'
 
 const IGNORED_NAMES = new Set([
@@ -30,6 +42,69 @@ const IGNORED_NAMES = new Set([
 
 const MAX_DEPTH = 8
 const MAX_ENTRIES = 2500
+const MAX_READ_BYTES = 10 * 1024 * 1024
+const BINARY_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.ico',
+  '.pdf',
+  '.zip',
+  '.tar',
+  '.gz',
+  '.7z',
+  '.exe',
+  '.dll',
+  '.bin',
+  '.wasm',
+])
+
+export interface WorkspaceDialogs {
+  showOpenDialog(options: OpenDialogOptions, parent?: BrowserWindow | null): Promise<OpenDialogReturnValue>
+  showMessageBox(options: MessageBoxOptions, parent?: BrowserWindow | null): Promise<MessageBoxReturnValue>
+}
+
+export interface WorkspaceServiceOptions {
+  userDataPath: string
+  getWindow: () => BrowserWindow | null
+  dialogs: WorkspaceDialogs
+}
+
+export class WorkspaceServiceError extends Error {
+  constructor(
+    readonly code: WorkspaceErrorCode,
+    message: string,
+    readonly details: Partial<WorkspaceErrorInfo> = {}
+  ) {
+    super(message)
+    this.name = 'WorkspaceServiceError'
+  }
+
+  toInfo(): WorkspaceErrorInfo {
+    return { code: this.code, message: this.message, ...this.details }
+  }
+}
+
+function toErrorInfo(error: unknown, fallbackPath?: string): WorkspaceErrorInfo {
+  if (error instanceof WorkspaceServiceError) return error.toInfo()
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  const message = error instanceof Error ? error.message : 'Filesystem operation failed.'
+  if (code === 'ENOENT') return { code: 'NOT_FOUND', message, path: fallbackPath }
+  if (code === 'EEXIST') return { code: 'ALREADY_EXISTS', message, path: fallbackPath }
+  if (code === 'EACCES' || code === 'EPERM' || code === 'EBUSY') {
+    return { code: 'PERMISSION_DENIED', message, path: fallbackPath }
+  }
+  return { code: 'IO_ERROR', message, path: fallbackPath }
+}
+
+async function asResult<T>(run: () => T | Promise<T>): Promise<WorkspaceResult<T>> {
+  try {
+    return { ok: true, value: await run() }
+  } catch (error) {
+    return { ok: false, error: toErrorInfo(error) }
+  }
+}
 
 export class WorkspaceService {
   private currentPath: string | null = null
@@ -37,24 +112,28 @@ export class WorkspaceService {
   private recentPaths: string[] = []
   private debounceTimer: NodeJS.Timeout | null = null
 
-  constructor(private readonly getWindow: () => BrowserWindow | null) {
+  constructor(private readonly options: WorkspaceServiceOptions) {
     this.loadRecentPaths()
   }
 
   private getStoragePath(): string {
-    return path.join(app.getPath('userData'), 'recent-workspaces.json')
+    return path.join(this.options.userDataPath, 'recent-workspaces.json')
   }
 
   private loadRecentPaths(): void {
     try {
       const storageFile = this.getStoragePath()
       if (fs.existsSync(storageFile)) {
-        const raw = fs.readFileSync(storageFile, 'utf-8')
-        const parsed = JSON.parse(raw)
+        const parsed: unknown = JSON.parse(fs.readFileSync(storageFile, 'utf-8'))
         if (Array.isArray(parsed)) {
-          this.recentPaths = parsed.filter(
-            (p): p is string => typeof p === 'string' && fs.existsSync(p) && fs.statSync(p).isDirectory()
-          )
+          this.recentPaths = parsed.filter((item): item is string => {
+            if (typeof item !== 'string') return false
+            try {
+              return fs.statSync(item).isDirectory()
+            } catch {
+              return false
+            }
+          })
         }
       }
     } catch {
@@ -65,20 +144,143 @@ export class WorkspaceService {
   private saveRecentPaths(): void {
     try {
       const storageFile = this.getStoragePath()
-      const dir = path.dirname(storageFile)
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true })
-      }
+      fs.mkdirSync(path.dirname(storageFile), { recursive: true })
       fs.writeFileSync(storageFile, JSON.stringify(this.recentPaths.slice(0, 10), null, 2), 'utf-8')
     } catch {
-      // Non-critical persistence failure
+      return
     }
   }
 
   private updateRecentPaths(newPath: string): void {
-    const normalized = path.resolve(newPath)
-    this.recentPaths = [normalized, ...this.recentPaths.filter((p) => p !== normalized)].slice(0, 10)
+    this.recentPaths = [newPath, ...this.recentPaths.filter((item) => item !== newPath)].slice(0, 10)
     this.saveRecentPaths()
+  }
+
+  private rootPath(): string {
+    if (!this.currentPath) {
+      throw new WorkspaceServiceError('NO_WORKSPACE', 'Open a project folder first.')
+    }
+    return this.currentPath
+  }
+
+  private containedPath(targetPath: string): string {
+    const root = this.rootPath()
+    const resolved = path.resolve(targetPath)
+    const realRoot = fs.realpathSync.native(root)
+    let cursor = resolved
+    while (!fs.existsSync(cursor)) {
+      const parent = path.dirname(cursor)
+      if (parent === cursor) break
+      cursor = parent
+    }
+
+    if (!fs.existsSync(cursor)) {
+      throw new WorkspaceServiceError('NOT_FOUND', 'Path does not exist.', { path: resolved })
+    }
+
+    const realCursor = fs.realpathSync.native(cursor)
+    const suffix = path.relative(cursor, resolved)
+    const candidate = suffix ? path.join(realCursor, suffix) : realCursor
+    const relative = path.relative(realRoot, candidate)
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new WorkspaceServiceError('PATH_OUTSIDE_WORKSPACE', 'Path is outside the selected workspace.', {
+        path: resolved,
+      })
+    }
+
+    return candidate
+  }
+
+  private validateName(rawName: string): string {
+    const name = rawName.trim()
+    if (!name || name === '.' || name === '..' || name !== path.basename(name)) {
+      throw new WorkspaceServiceError('INVALID_NAME', 'Enter a valid file or folder name.')
+    }
+    const hasControl = Array.from(name).some((char) => char.charCodeAt(0) < 32)
+    if (/[\\/:*?"<>|]/.test(name) || hasControl) {
+      throw new WorkspaceServiceError('INVALID_NAME', 'Name contains unsupported characters.')
+    }
+    if (process.platform === 'win32' && /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(name)) {
+      throw new WorkspaceServiceError('INVALID_NAME', 'Name is reserved by Windows.')
+    }
+    return name
+  }
+
+  private relativeDisplayPath(resolved: string): string {
+    return path.relative(this.rootPath(), resolved).replace(/\\/g, '/')
+  }
+
+  private makeFileState(resolved: string, stats: fs.Stats, buffer?: Buffer): FileState {
+    const hash = buffer
+      ? createHash('sha256').update(buffer).digest('hex')
+      : `meta:${stats.size}:${Math.trunc(stats.mtimeMs)}`
+    return { path: resolved, size: stats.size, mtimeMs: stats.mtimeMs, hash }
+  }
+
+  private statFile(resolved: string): fs.Stats {
+    let stats: fs.Stats
+    try {
+      stats = fs.statSync(resolved)
+    } catch {
+      throw new WorkspaceServiceError('NOT_FOUND', 'File no longer exists.', { path: resolved })
+    }
+    if (!stats.isFile()) {
+      throw new WorkspaceServiceError('INVALID_TARGET', 'Path is not a file.', { path: resolved })
+    }
+    return stats
+  }
+
+  private computeFileState(resolved: string): FileState {
+    const stats = this.statFile(resolved)
+    const ext = path.extname(resolved).toLowerCase()
+    const readable = stats.size <= MAX_READ_BYTES && !BINARY_EXTENSIONS.has(ext)
+    return this.makeFileState(resolved, stats, readable ? fs.readFileSync(resolved) : undefined)
+  }
+
+  private statDirectory(resolved: string): fs.Stats {
+    let stats: fs.Stats
+    try {
+      stats = fs.statSync(resolved)
+    } catch {
+      throw new WorkspaceServiceError('NOT_FOUND', 'Folder no longer exists.', { path: resolved })
+    }
+    if (!stats.isDirectory()) {
+      throw new WorkspaceServiceError('INVALID_TARGET', 'Path is not a folder.', { path: resolved })
+    }
+    return stats
+  }
+
+  private readFileRequired(targetPath: string): OpenedFile {
+    const resolved = this.containedPath(targetPath)
+    const stats = this.statFile(resolved)
+    const ext = path.extname(resolved).toLowerCase()
+    const readable = stats.size <= MAX_READ_BYTES && !BINARY_EXTENSIONS.has(ext)
+
+    if (!readable) {
+      return {
+        ...this.makeFileState(resolved, stats),
+        name: path.basename(resolved),
+        relativePath: this.relativeDisplayPath(resolved),
+        content: BINARY_EXTENSIONS.has(ext)
+          ? `/* Binary file (${ext}): preview not available as plain text. Size: ${stats.size} bytes */`
+          : '/* File is larger than 10MB. Displaying raw text disabled for performance. */',
+        extension: ext,
+        lineCount: 1,
+        readable: false,
+      }
+    }
+
+    const buffer = fs.readFileSync(resolved)
+    const content = buffer.toString('utf-8')
+    return {
+      ...this.makeFileState(resolved, stats, buffer),
+      name: path.basename(resolved),
+      relativePath: this.relativeDisplayPath(resolved),
+      content,
+      extension: ext,
+      lineCount: content.split('\n').length,
+      readable: true,
+    }
   }
 
   public getWorkspaceInfo(): WorkspaceInfo | null {
@@ -91,143 +293,180 @@ export class WorkspaceService {
   }
 
   public async openFolder(): Promise<WorkspaceOpenResult | null> {
-    const win = this.getWindow()
-    const options: Electron.OpenDialogOptions = {
+    const root = this.currentPath ?? undefined
+    const options: OpenDialogOptions = {
       title: 'Open Project Folder',
       properties: ['openDirectory', 'createDirectory'],
+      ...(root ? { defaultPath: root } : {}),
     }
-    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    const parent = this.options.getWindow()
+    const result = parent
+      ? await this.options.dialogs.showOpenDialog(options, parent)
+      : await this.options.dialogs.showOpenDialog(options)
+    if (result.canceled || result.filePaths.length === 0) return null
 
-    if (result.canceled || result.filePaths.length === 0) {
-      return null
-    }
-
-    const ws = this.setCurrent(result.filePaths[0])
-    if (!ws) return null
-
-    const tree = this.getTree(ws.path)
-    if (!tree) return null
-
-    return { workspace: ws, tree }
+    const workspace = this.setCurrent(result.filePaths[0])
+    if (!workspace) return null
+    const tree = this.getTree(workspace.path)
+    return tree ? { workspace, tree } : null
   }
 
   public async openFile(): Promise<OpenedFile | null> {
-    const win = this.getWindow()
-    const options: Electron.OpenDialogOptions = {
+    const root = this.currentPath
+    if (!root) return null
+    const options: OpenDialogOptions = {
       title: 'Open File',
       properties: ['openFile'],
+      defaultPath: root,
     }
-    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    const parent = this.options.getWindow()
+    const result = parent
+      ? await this.options.dialogs.showOpenDialog(options, parent)
+      : await this.options.dialogs.showOpenDialog(options)
+    if (result.canceled || result.filePaths.length === 0) return null
 
-    if (result.canceled || result.filePaths.length === 0) {
+    try {
+      return this.readFileRequired(result.filePaths[0])
+    } catch {
       return null
     }
-
-    return this.readFile(result.filePaths[0])
   }
 
   public readFile(targetPath: string): OpenedFile | null {
     try {
-      const resolved = path.resolve(targetPath)
-      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
-        return null
-      }
-
-      const stats = fs.statSync(resolved)
-      const ext = path.extname(resolved).toLowerCase()
-      const relPath = this.currentPath
-        ? path.relative(this.currentPath, resolved).replace(/\\/g, '/')
-        : path.basename(resolved)
-
-      // Guard against huge files
-      if (stats.size > 10 * 1024 * 1024) {
-        return {
-          path: resolved,
-          name: path.basename(resolved),
-          relativePath: relPath,
-          content: '/* File is larger than 10MB. Displaying raw text disabled for performance. */',
-          size: stats.size,
-          extension: ext,
-          lineCount: 1,
-        }
-      }
-
-      // Check binary extensions
-      const binaryExts = new Set([
-        '.png',
-        '.jpg',
-        '.jpeg',
-        '.gif',
-        '.ico',
-        '.pdf',
-        '.zip',
-        '.tar',
-        '.gz',
-        '.7z',
-        '.exe',
-        '.dll',
-        '.bin',
-        '.wasm',
-      ])
-      if (binaryExts.has(ext)) {
-        return {
-          path: resolved,
-          name: path.basename(resolved),
-          relativePath: relPath,
-          content: `/* Binary file (${ext}): preview not available as plain text. Size: ${stats.size} bytes */`,
-          size: stats.size,
-          extension: ext,
-          lineCount: 1,
-        }
-      }
-
-      const content = fs.readFileSync(resolved, 'utf-8')
-      const lines = content.split('\n')
-
-      return {
-        path: resolved,
-        name: path.basename(resolved),
-        relativePath: relPath,
-        content,
-        size: stats.size,
-        extension: ext,
-        lineCount: lines.length,
-      }
+      return this.readFileRequired(targetPath)
     } catch {
       return null
     }
   }
 
-  public async saveFile(targetPath: string, content: string): Promise<OpenedFile | null> {
-    try {
-      const resolved = path.resolve(targetPath)
-      const dir = path.dirname(resolved)
-      if (!fs.existsSync(dir)) {
-        await fs.promises.mkdir(dir, { recursive: true })
+  public getFileState(targetPath: string): Promise<WorkspaceResult<FileState>> {
+    return asResult(() => {
+      const resolved = this.containedPath(targetPath)
+      return this.computeFileState(resolved)
+    })
+  }
+
+  public saveFile(
+    targetPath: string,
+    content: string,
+    expected?: FileState
+  ): Promise<WorkspaceResult<OpenedFile>> {
+    return asResult(async () => {
+      const resolved = this.containedPath(targetPath)
+      this.statFile(resolved)
+
+      if (expected) {
+        const current = this.computeFileState(resolved)
+        if (
+          current.hash !== expected.hash ||
+          current.size !== expected.size ||
+          current.mtimeMs !== expected.mtimeMs
+        ) {
+          throw new WorkspaceServiceError(
+            'CONFLICT',
+            'This file changed on disk since it was opened. Reload it before saving or overwrite deliberately.',
+            { path: resolved, current }
+          )
+        }
       }
+
       await fs.promises.writeFile(resolved, content, 'utf-8')
-      return this.readFile(resolved)
-    } catch {
-      return null
-    }
+      return this.readFileRequired(resolved)
+    })
+  }
+
+  public createEntry(
+    parentPath: string,
+    rawName: string,
+    type: 'file' | 'directory'
+  ): Promise<WorkspaceResult<WorkspaceEntry>> {
+    return asResult(async () => {
+      const parent = this.containedPath(parentPath)
+      this.statDirectory(parent)
+      const name = this.validateName(rawName)
+      const target = this.containedPath(path.join(parent, name))
+      if (fs.existsSync(target)) {
+        throw new WorkspaceServiceError('ALREADY_EXISTS', `"${name}" already exists.`, { path: target })
+      }
+
+      if (type === 'directory') {
+        await fs.promises.mkdir(target)
+      } else {
+        await fs.promises.writeFile(target, '', { flag: 'wx' })
+      }
+
+      return { path: target, type }
+    })
+  }
+
+  public renameEntry(targetPath: string, rawName: string): Promise<WorkspaceResult<WorkspaceEntry>> {
+    return asResult(async () => {
+      const resolved = this.containedPath(targetPath)
+      if (resolved === this.rootPath()) {
+        throw new WorkspaceServiceError('INVALID_TARGET', 'The workspace folder cannot be renamed.', { path: resolved })
+      }
+      const stat = fs.statSync(resolved)
+      const name = this.validateName(rawName)
+      const destination = this.containedPath(path.join(path.dirname(resolved), name))
+      if (destination !== resolved && fs.existsSync(destination)) {
+        throw new WorkspaceServiceError('ALREADY_EXISTS', `"${name}" already exists.`, { path: destination })
+      }
+
+      await fs.promises.rename(resolved, destination)
+      return { path: destination, type: stat.isDirectory() ? 'directory' : 'file' }
+    })
+  }
+
+  public deleteEntry(targetPath: string): Promise<WorkspaceResult<{ deleted: boolean }>> {
+    return asResult(async () => {
+      const resolved = this.containedPath(targetPath)
+      if (resolved === this.rootPath()) {
+        throw new WorkspaceServiceError('INVALID_TARGET', 'The workspace folder cannot be deleted.', { path: resolved })
+      }
+      const stat = fs.statSync(resolved)
+      const options: MessageBoxOptions = {
+        type: 'warning',
+        title: stat.isDirectory() ? 'Delete folder?' : 'Delete file?',
+        message: `Delete "${path.basename(resolved)}" from the workspace?`,
+        detail: resolved,
+        buttons: ['Delete', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+      }
+      const parent = this.options.getWindow()
+      const answer = parent
+        ? await this.options.dialogs.showMessageBox(options, parent)
+        : await this.options.dialogs.showMessageBox(options)
+      if (answer.response !== 0) return { deleted: false }
+
+      if (stat.isDirectory()) {
+        await fs.promises.rm(resolved, { recursive: true })
+      } else {
+        await fs.promises.unlink(resolved)
+      }
+      return { deleted: true }
+    })
   }
 
   public async selectDirectory(): Promise<WorkspaceInfo | null> {
-    const res = await this.openFolder()
-    return res ? res.workspace : this.getWorkspaceInfo()
+    const result = await this.openFolder()
+    return result ? result.workspace : this.getWorkspaceInfo()
   }
 
   public setCurrent(dirPath: string): WorkspaceInfo | null {
-    const resolved = path.resolve(dirPath)
-    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+    try {
+      const resolved = path.resolve(dirPath)
+      const realPath = fs.realpathSync.native(resolved)
+      if (!fs.statSync(realPath).isDirectory()) return null
+
+      this.currentPath = realPath
+      this.updateRecentPaths(realPath)
+      this.setupWatcher(realPath)
+      return this.getWorkspaceInfo()
+    } catch {
       return null
     }
-
-    this.currentPath = resolved
-    this.updateRecentPaths(resolved)
-    this.setupWatcher(resolved)
-
-    return this.getWorkspaceInfo()
   }
 
   private setupWatcher(rootPath: string): void {
@@ -235,28 +474,26 @@ export class WorkspaceService {
       this.watcher.close()
       this.watcher = null
     }
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer)
+      this.debounceTimer = null
+    }
 
     try {
-      // Recursive watch works natively on Windows and macOS
       this.watcher = fs.watch(rootPath, { recursive: true }, (_eventType, filename) => {
         if (!filename) return
-
-        // Skip ignored directories in the path
         const segments = filename.split(/[/\\]/)
-        if (segments.some((seg) => IGNORED_NAMES.has(seg))) {
-          return
-        }
+        if (segments.some((segment) => IGNORED_NAMES.has(segment))) return
 
-        // Debounce notifications
         if (this.debounceTimer) clearTimeout(this.debounceTimer)
         this.debounceTimer = setTimeout(() => {
           const fullPath = path.join(rootPath, filename)
-          const exists = fs.existsSync(fullPath)
-          const isDir = exists && fs.statSync(fullPath).isDirectory()
-
-          let type: FileChangeEvent['type'] = exists ? 'change' : 'unlink'
-          if (isDir) {
-            type = 'change'
+          let type: FileChangeEvent['type'] = 'change'
+          try {
+            const stat = fs.statSync(fullPath)
+            type = stat.isDirectory() ? 'addDir' : 'add'
+          } catch {
+            type = 'unlink'
           }
 
           const event: FileChangeEvent = {
@@ -264,112 +501,91 @@ export class WorkspaceService {
             path: fullPath,
             relativePath: filename.replace(/\\/g, '/'),
           }
-
-          const win = this.getWindow()
-          win?.webContents.send(IpcChannels.workspaceFileChanged, event)
+          this.options.getWindow()?.webContents.send(IpcChannels.workspaceFileChanged, event)
         }, 200)
       })
     } catch {
-      // Watching not supported or failed
       this.watcher = null
     }
   }
 
   public getTree(customRoot?: string): FileTreeNode | null {
-    const target = customRoot ? path.resolve(customRoot) : this.currentPath
-    if (!target) return null
+    try {
+      const target = this.containedPath(customRoot ?? this.rootPath())
+      this.statDirectory(target)
+      let entryCount = 0
 
-    // Path traversal guard: must reside within currentPath if set
-    if (this.currentPath) {
-      const rel = path.relative(this.currentPath, target)
-      if (rel.startsWith('..') && rel !== '..') {
-        return null
-      }
-    }
+      const buildNode = (currentDir: string, depth: number): FileTreeNode => {
+        const node: FileTreeNode = {
+          name: path.basename(currentDir) || currentDir,
+          path: currentDir,
+          relativePath: this.relativeDisplayPath(currentDir),
+          type: 'directory',
+          children: [],
+        }
 
-    if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
-      return null
-    }
+        if (depth >= MAX_DEPTH || entryCount >= MAX_ENTRIES) return node
 
-    let entryCount = 0
+        try {
+          const entries = fs.readdirSync(currentDir, { withFileTypes: true })
+          const dirs: fs.Dirent[] = []
+          const files: fs.Dirent[] = []
 
-    const buildNode = (currentDir: string, depth: number): FileTreeNode => {
-      const name = path.basename(currentDir) || currentDir
-      const relativePath = this.currentPath ? path.relative(this.currentPath, currentDir).replace(/\\/g, '/') : ''
+          for (const entry of entries) {
+            if (IGNORED_NAMES.has(entry.name)) continue
+            if (entry.name.startsWith('.') && entry.name !== '.gitignore' && entry.name !== '.env.example') continue
+            if (entry.isDirectory()) dirs.push(entry)
+            else if (entry.isFile()) files.push(entry)
+          }
 
-      const node: FileTreeNode = {
-        name,
-        path: currentDir,
-        relativePath,
-        type: 'directory',
-        children: [],
-      }
+          const sort = (a: fs.Dirent, b: fs.Dirent) =>
+            a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+          dirs.sort(sort)
+          files.sort(sort)
 
-      if (depth >= MAX_DEPTH || entryCount >= MAX_ENTRIES) {
+          for (const entry of dirs) {
+            if (entryCount >= MAX_ENTRIES) break
+            entryCount++
+            node.children?.push(buildNode(path.join(currentDir, entry.name), depth + 1))
+          }
+
+          for (const entry of files) {
+            if (entryCount >= MAX_ENTRIES) break
+            entryCount++
+            const filePath = path.join(currentDir, entry.name)
+            let size = 0
+            try {
+              size = fs.statSync(filePath).size
+            } catch {
+              size = 0
+            }
+            node.children?.push({
+              name: entry.name,
+              path: filePath,
+              relativePath: this.relativeDisplayPath(filePath),
+              type: 'file',
+              size,
+              extension: path.extname(entry.name).toLowerCase(),
+            })
+          }
+        } catch {
+          return node
+        }
+
         return node
       }
 
-      try {
-        const entries = fs.readdirSync(currentDir, { withFileTypes: true })
-
-        // Partition into folders and files
-        const dirs: fs.Dirent[] = []
-        const files: fs.Dirent[] = []
-
-        for (const entry of entries) {
-          if (IGNORED_NAMES.has(entry.name)) continue
-          if (entry.name.startsWith('.') && entry.name !== '.gitignore' && entry.name !== '.env.example') continue
-
-          if (entry.isDirectory()) {
-            dirs.push(entry)
-          } else if (entry.isFile()) {
-            files.push(entry)
-          }
-        }
-
-        // Sort alphabetically
-        dirs.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-        files.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-
-        for (const d of dirs) {
-          if (entryCount >= MAX_ENTRIES) break
-          entryCount++
-          const childPath = path.join(currentDir, d.name)
-          node.children?.push(buildNode(childPath, depth + 1))
-        }
-
-        for (const f of files) {
-          if (entryCount >= MAX_ENTRIES) break
-          entryCount++
-          const filePath = path.join(currentDir, f.name)
-          const ext = path.extname(f.name).toLowerCase()
-          let size = 0
-          try {
-            size = fs.statSync(filePath).size
-          } catch {
-            // file stat error ignored
-          }
-
-          node.children?.push({
-            name: f.name,
-            path: filePath,
-            relativePath: this.currentPath ? path.relative(this.currentPath, filePath).replace(/\\/g, '/') : f.name,
-            type: 'file',
-            size,
-            extension: ext,
-          })
-        }
-      } catch {
-        // Permission or read error
-      }
-
-      return node
+      return buildNode(target, 0)
+    } catch {
+      return null
     }
-
-    return buildNode(target, 0)
   }
 
   public dispose(): void {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer)
+      this.debounceTimer = null
+    }
     if (this.watcher) {
       this.watcher.close()
       this.watcher = null

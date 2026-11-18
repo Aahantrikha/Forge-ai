@@ -1,5 +1,5 @@
 import type { ViewId } from '../app/navigation'
-import type { FileTreeNode, OpenedFile, WorkspaceInfo } from '../shared/workspace'
+import type { FileTreeNode, OpenedFile, WorkspaceEntry, WorkspaceInfo, WorkspaceResult } from '../shared/workspace'
 import { ChatSidebar } from '../views/ChatView'
 import { HistorySidebar } from '../views/HistoryView'
 import { SettingsSidebar } from '../views/SettingsView'
@@ -18,6 +18,9 @@ interface SidebarProps {
   onSelectFile: (node: FileTreeNode) => Promise<void>
   onRefreshTree: () => Promise<void>
   onSwitchWorkspace: (path: string) => Promise<void>
+  onCreateEntry: (parentPath: string, name: string, type: 'file' | 'directory') => Promise<WorkspaceResult<WorkspaceEntry> | null>
+  onRenameEntry: (entryPath: string, newName: string) => Promise<WorkspaceResult<WorkspaceEntry> | null>
+  onDeleteEntry: (entryPath: string) => Promise<void>
 }
 
 /** Contextual sidebar: content is owned by each view module and rendered by view id. */
@@ -33,6 +36,9 @@ export function Sidebar({
   onSelectFile,
   onRefreshTree,
   onSwitchWorkspace,
+  onCreateEntry,
+  onRenameEntry,
+  onDeleteEntry,
 }: SidebarProps) {
   return (
     <div className="sidebar">
@@ -49,6 +55,9 @@ export function Sidebar({
           onSelectFile={onSelectFile}
           onRefreshTree={onRefreshTree}
           onSwitchWorkspace={onSwitchWorkspace}
+          onCreateEntry={onCreateEntry}
+          onRenameEntry={onRenameEntry}
+          onDeleteEntry={onDeleteEntry}
         />
       ) : view === 'history' ? (
         <HistorySidebar />

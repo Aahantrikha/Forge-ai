@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import Database from 'better-sqlite3'
+import type Database from 'better-sqlite3'
 import { MIGRATIONS } from './schema'
+import { createSqliteDatabase } from './sqlite'
 
 export class ForgeDatabase {
   readonly db: Database.Database
@@ -11,7 +12,7 @@ export class ForgeDatabase {
     this.filePath = filePath
     const dir = path.dirname(filePath)
     fs.mkdirSync(dir, { recursive: true })
-    this.db = new Database(filePath)
+    this.db = createSqliteDatabase(filePath)
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
     this.db.pragma('busy_timeout = 5000')

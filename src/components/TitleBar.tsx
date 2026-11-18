@@ -5,6 +5,7 @@ interface TitleBarProps {
   sidebarOpen: boolean
   workspace?: WorkspaceInfo | null
   activeFileName?: string | null
+  isDirty?: boolean
   onToggleSidebar: () => void
 }
 
@@ -16,6 +17,7 @@ export function TitleBar({
   sidebarOpen,
   workspace,
   activeFileName,
+  isDirty,
   onToggleSidebar,
 }: TitleBarProps) {
   return (
@@ -41,8 +43,12 @@ export function TitleBar({
           </span>
         ) : null}
         {activeFileName ? (
-          <span className="titlebar-file-chip" title={activeFileName}>
+          <span
+            className={`titlebar-file-chip${isDirty ? ' is-dirty' : ''}`}
+            title={isDirty ? `${activeFileName} — unsaved changes` : activeFileName}
+          >
             {activeFileName}
+            {isDirty ? <span className="dirty-dot" aria-label="Unsaved changes" /> : null}
           </span>
         ) : null}
       </div>

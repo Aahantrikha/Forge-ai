@@ -6,6 +6,7 @@ interface StatusBarProps {
   selectedAgent: AgentId | null
   workspace: WorkspaceInfo | null
   activeFile?: OpenedFile | null
+  isDirty?: boolean
   onOpenFolder: () => void
 }
 
@@ -17,6 +18,7 @@ export function StatusBar({
   selectedAgent,
   workspace,
   activeFile,
+  isDirty,
   onOpenFolder,
 }: StatusBarProps) {
   const selected = getAgent(selectedAgent)
@@ -47,6 +49,7 @@ export function StatusBar({
             <span>
               {activeFile.name} ({activeFile.lineCount} lines)
             </span>
+            {isDirty ? <span className="status-dirty">Unsaved</span> : null}
           </span>
         </>
       ) : null}

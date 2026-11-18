@@ -9,6 +9,7 @@ import type {
   AgentSession,
   CreateSessionOptions,
   FileChangeEvent,
+  FileState,
   ForgeApi,
   SubmitPromptOptions,
 } from '../src/shared/ipc'
@@ -38,7 +39,14 @@ const api: ForgeApi = {
     getTree: (rootPath?: string) => ipcRenderer.invoke(IpcChannels.workspaceGetTree, rootPath),
     readDirectory: (rootPath?: string) => ipcRenderer.invoke(IpcChannels.workspaceGetTree, rootPath),
     readFile: (filePath: string) => ipcRenderer.invoke(IpcChannels.workspaceReadFile, filePath),
-    saveFile: (filePath: string, content: string) => ipcRenderer.invoke(IpcChannels.workspaceSaveFile, filePath, content),
+    saveFile: (filePath: string, content: string, expected?: FileState) =>
+      ipcRenderer.invoke(IpcChannels.workspaceSaveFile, filePath, content, expected),
+    getFileState: (filePath: string) => ipcRenderer.invoke(IpcChannels.workspaceGetFileState, filePath),
+    createEntry: (parentPath: string, name: string, type: 'file' | 'directory') =>
+      ipcRenderer.invoke(IpcChannels.workspaceCreateEntry, parentPath, name, type),
+    renameEntry: (entryPath: string, newName: string) =>
+      ipcRenderer.invoke(IpcChannels.workspaceRenameEntry, entryPath, newName),
+    deleteEntry: (entryPath: string) => ipcRenderer.invoke(IpcChannels.workspaceDeleteEntry, entryPath),
     onFileChanged: (listener) => {
       const wrapped = (_event: IpcRendererEvent, event: FileChangeEvent) => listener(event)
       ipcRenderer.on(IpcChannels.workspaceFileChanged, wrapped)
