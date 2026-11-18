@@ -60,39 +60,56 @@ export class OpencodeAdapter implements AgentAdapter {
 
   /**
    * Ensures the OpenCode local server is active on 127.0.0.1.
-   * If a server is already listening on port 4096, reuses it; otherwise starts one.
+   * If a server is already listening on a local port, reuses it; otherwise starts one.
    */
   private async ensureServer(): Promise<{ url: string; client: OpencodeClient }> {
     if (this.client && this.serverUrl) {
       return { url: this.serverUrl, client: this.client }
     }
 
-    // Check if an existing server is running on default port 4096
-    const defaultUrl = 'http://127.0.0.1:4096'
-    try {
-      const probe = await fetch(`${defaultUrl}/project`, { method: 'GET', signal: AbortSignal.timeout(1200) })
-      if (probe.ok) {
-        this.serverUrl = defaultUrl
-        this.client = createOpencodeClient({ baseUrl: defaultUrl })
-        return { url: defaultUrl, client: this.client }
+    const candidatePorts = [4096, 4097, 4098, 4099]
+
+    // 1. Check if an existing OpenCode server is already active
+    for (const port of candidatePorts) {
+      const probeUrl = `http://127.0.0.1:${port}`
+      try {
+        const probe = await fetch(`${probeUrl}/project`, {
+          method: 'GET',
+          signal: AbortSignal.timeout(1000),
+        })
+        if (probe.ok) {
+          this.serverUrl = probeUrl
+          this.client = createOpencodeClient({ baseUrl: probeUrl })
+          return { url: probeUrl, client: this.client }
+        }
+      } catch {
+        // Not responding on this port, continue
       }
-    } catch {
-      // No server on 4096, will launch new instance
     }
 
+    // 2. Launch a new headless server on an available port
     this.ensureBinPath()
-    try {
-      this.server = await createOpencodeServer({
-        hostname: '127.0.0.1',
-        port: 4096,
-        timeout: 15000,
-      })
-      this.serverUrl = this.server.url
-      this.client = createOpencodeClient({ baseUrl: this.server.url })
-      return { url: this.serverUrl, client: this.client }
-    } catch (err) {
-      throw new Error(`Failed to start OpenCode headless server on 127.0.0.1: ${err instanceof Error ? err.message : String(err)}`)
+    let lastError: unknown = null
+    for (const port of candidatePorts) {
+      try {
+        this.server = await createOpencodeServer({
+          hostname: '127.0.0.1',
+          port,
+          timeout: 12000,
+        })
+        this.serverUrl = this.server.url
+        this.client = createOpencodeClient({ baseUrl: this.server.url })
+        return { url: this.serverUrl, client: this.client }
+      } catch (err) {
+        lastError = err
+      }
     }
+
+    throw new Error(
+      `Failed to start OpenCode headless server on 127.0.0.1: ${
+        lastError instanceof Error ? lastError.message : String(lastError)
+      }`
+    )
   }
 
   /**
