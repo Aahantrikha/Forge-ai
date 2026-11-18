@@ -62,6 +62,7 @@ export const IpcChannels = {
   workspaceOpenFolder: 'forge:workspace:open-folder',
   workspaceOpenFile: 'forge:workspace:open-file',
   workspaceReadFile: 'forge:workspace:read-file',
+  workspaceSaveFile: 'forge:workspace:save-file',
   workspaceSelectDirectory: 'forge:workspace:select-directory',
   workspaceGetCurrent: 'forge:workspace:get-current',
   workspaceSetCurrent: 'forge:workspace:set-current',
@@ -115,6 +116,7 @@ export interface ForgeApi {
     getTree(rootPath?: string): Promise<FileTreeNode | null>
     readDirectory(rootPath?: string): Promise<FileTreeNode | null>
     readFile(filePath: string): Promise<OpenedFile | null>
+    saveFile(filePath: string, content: string): Promise<OpenedFile | null>
     /** Subscribe to workspace file changes; returns an unsubscribe function. */
     onFileChanged(listener: (event: FileChangeEvent) => void): () => void
     /** Subscribe to native menu File > Open Folder; returns an unsubscribe function. */

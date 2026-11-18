@@ -198,6 +198,20 @@ export class WorkspaceService {
     }
   }
 
+  public async saveFile(targetPath: string, content: string): Promise<OpenedFile | null> {
+    try {
+      const resolved = path.resolve(targetPath)
+      const dir = path.dirname(resolved)
+      if (!fs.existsSync(dir)) {
+        await fs.promises.mkdir(dir, { recursive: true })
+      }
+      await fs.promises.writeFile(resolved, content, 'utf-8')
+      return this.readFile(resolved)
+    } catch {
+      return null
+    }
+  }
+
   public async selectDirectory(): Promise<WorkspaceInfo | null> {
     const res = await this.openFolder()
     return res ? res.workspace : this.getWorkspaceInfo()

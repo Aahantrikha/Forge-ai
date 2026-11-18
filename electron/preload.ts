@@ -38,6 +38,7 @@ const api: ForgeApi = {
     getTree: (rootPath?: string) => ipcRenderer.invoke(IpcChannels.workspaceGetTree, rootPath),
     readDirectory: (rootPath?: string) => ipcRenderer.invoke(IpcChannels.workspaceGetTree, rootPath),
     readFile: (filePath: string) => ipcRenderer.invoke(IpcChannels.workspaceReadFile, filePath),
+    saveFile: (filePath: string, content: string) => ipcRenderer.invoke(IpcChannels.workspaceSaveFile, filePath, content),
     onFileChanged: (listener) => {
       const wrapped = (_event: IpcRendererEvent, event: FileChangeEvent) => listener(event)
       ipcRenderer.on(IpcChannels.workspaceFileChanged, wrapped)

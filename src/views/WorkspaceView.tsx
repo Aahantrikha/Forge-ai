@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FileTreeNode, OpenedFile, WorkspaceInfo } from '../shared/workspace'
 import { EmptyState } from '../components/EmptyState'
 import {
@@ -22,6 +22,7 @@ export interface WorkspaceViewProps {
   onOpenFile: () => Promise<void>
   onSelectFile: (node: FileTreeNode) => Promise<void>
   onCloseFile: () => void
+  onSaveFile?: (filePath: string, content: string) => Promise<OpenedFile | null>
   onRefreshTree: () => Promise<void>
   onSwitchWorkspace: (path: string) => Promise<void>
 }
@@ -75,6 +76,7 @@ export function WorkspaceView({
   onOpenFolder,
   onOpenFile,
   onCloseFile,
+  onSaveFile,
   onSwitchWorkspace,
 }: WorkspaceViewProps) {
   // Count files & folders
@@ -128,7 +130,7 @@ export function WorkspaceView({
       </header>
 
       {activeFile ? (
-        <FileContentViewer file={activeFile} onClose={onCloseFile} />
+        <FileContentViewer file={activeFile} onClose={onCloseFile} onSaveFile={onSaveFile} />
       ) : workspace ? (
         <div className="centered-content">
           <div className="panel project-launcher">
@@ -239,16 +241,79 @@ function FeatureBullet() {
   return <span className="feature-dot" aria-hidden="true" />
 }
 
-/** Full-featured file content viewer with line numbers and copy functionality. */
-function FileContentViewer({ file, onClose }: { file: OpenedFile; onClose: () => void }) {
+/** Interactive code editor and file viewer with line numbers, tab support, and Save capability. */
+function FileContentViewer({
+  file,
+  onClose,
+  onSaveFile,
+}: {
+  file: OpenedFile
+  onClose: () => void
+  onSaveFile?: (filePath: string, content: string) => Promise<OpenedFile | null>
+}) {
+  const [content, setContent] = useState(file.content)
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveSuccess, setSaveSuccess] = useState(false)
   const [copied, setCopied] = useState(false)
-  const lines = file.content.split('\n')
+  const editorRef = useRef<HTMLTextAreaElement | null>(null)
+  const linesRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    setContent(file.content)
+    setSaveSuccess(false)
+  }, [file.path, file.content])
+
+  const isDirty = content !== file.content
+  const lines = content.split('\n')
+
+  const handleScroll = () => {
+    if (editorRef.current && linesRef.current) {
+      linesRef.current.scrollTop = editorRef.current.scrollTop
+    }
+  }
+
+  const handleSave = async () => {
+    if (!onSaveFile || !isDirty || isSaving) return
+    setIsSaving(true)
+    try {
+      const updated = await onSaveFile(file.path, content)
+      if (updated) {
+        setSaveSuccess(true)
+        setTimeout(() => setSaveSuccess(false), 2000)
+      }
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault()
+      void handleSave()
+      return
+    }
+
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      const target = e.currentTarget
+      const start = target.selectionStart
+      const end = target.selectionEnd
+      const newContent = content.substring(0, start) + '  ' + content.substring(end)
+      setContent(newContent)
+      requestAnimationFrame(() => {
+        target.selectionStart = target.selectionEnd = start + 2
+      })
+    }
+  }
 
   const handleCopy = () => {
-    void navigator.clipboard.writeText(file.content)
+    void navigator.clipboard.writeText(content)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
+
+  const isBinaryOrLarge =
+    file.content.startsWith('/* File is larger') || file.content.startsWith('/* Binary file')
 
   return (
     <div className="file-viewer-container">
@@ -262,29 +327,73 @@ function FileContentViewer({ file, onClose }: { file: OpenedFile; onClose: () =>
             {file.relativePath}
           </span>
           <span className="badge badge-planned">{formatBytes(file.size)}</span>
-          <span className="badge badge-planned">{file.lineCount} lines</span>
+          <span className="badge badge-planned">{lines.length} lines</span>
+          {isDirty && (
+            <span className="badge-modified" title="Unsaved changes (Press Ctrl+S to save)">
+              <span className="badge-modified-dot" />
+              Modified
+            </span>
+          )}
         </div>
         <div className="file-viewer-actions">
+          {!isBinaryOrLarge && onSaveFile && (
+            <button
+              type="button"
+              className={`btn btn-sm${isDirty ? ' btn-primary' : ''}`}
+              disabled={!isDirty || isSaving}
+              onClick={() => void handleSave()}
+              title="Save changes (Ctrl+S)"
+            >
+              {isSaving ? (
+                <span>Saving…</span>
+              ) : saveSuccess ? (
+                <>
+                  <CheckIcon size={13} />
+                  <span>Saved!</span>
+                </>
+              ) : (
+                <span>Save</span>
+              )}
+            </button>
+          )}
           <button type="button" className="btn btn-sm" onClick={handleCopy} title="Copy file contents">
             {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
             {copied ? 'Copied!' : 'Copy'}
           </button>
-          <button type="button" className="icon-btn-sm" onClick={onClose} title="Close file viewer" aria-label="Close file viewer">
+          <button
+            type="button"
+            className="icon-btn-sm"
+            onClick={onClose}
+            title="Close file viewer"
+            aria-label="Close file viewer"
+          >
             <CloseIcon size={14} />
           </button>
         </div>
       </div>
       <div className="file-viewer-code-wrap">
-        <div className="file-viewer-lines" aria-hidden="true">
+        <div ref={linesRef} className="file-viewer-lines" aria-hidden="true" style={{ overflow: 'hidden' }}>
           {lines.map((_, i) => (
             <div key={i} className="line-number">
               {i + 1}
             </div>
           ))}
         </div>
-        <pre className="file-viewer-code">
-          <code>{file.content}</code>
-        </pre>
+        {isBinaryOrLarge ? (
+          <pre className="file-viewer-code">
+            <code>{file.content}</code>
+          </pre>
+        ) : (
+          <textarea
+            ref={editorRef}
+            className="file-viewer-editor"
+            value={content}
+            spellCheck={false}
+            onChange={(e) => setContent(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onScroll={handleScroll}
+          />
+        )}
       </div>
     </div>
   )

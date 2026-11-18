@@ -73,6 +73,9 @@ function registerIpcHandlers() {
   ipcMain.handle(IpcChannels.workspaceOpenFolder, () => workspaceService.openFolder())
   ipcMain.handle(IpcChannels.workspaceOpenFile, () => workspaceService.openFile())
   ipcMain.handle(IpcChannels.workspaceReadFile, (_event, filePath: string) => workspaceService.readFile(filePath))
+  ipcMain.handle(IpcChannels.workspaceSaveFile, (_event, filePath: string, content: string) =>
+    workspaceService.saveFile(filePath, content)
+  )
   ipcMain.handle(IpcChannels.workspaceSelectDirectory, () => workspaceService.selectDirectory())
   ipcMain.handle(IpcChannels.workspaceGetCurrent, () => workspaceService.getWorkspaceInfo())
   ipcMain.handle(IpcChannels.workspaceSetCurrent, (_event, dirPath: string) => workspaceService.setCurrent(dirPath))

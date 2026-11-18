@@ -114,6 +114,19 @@ export default function App() {
     setActiveFile(null)
   }
 
+  const handleSaveFile = useCallback(async (filePath: string, content: string): Promise<OpenedFile | null> => {
+    if (!forgeApi?.workspace) return null
+    try {
+      const updated = await forgeApi.workspace.saveFile(filePath, content)
+      if (updated) {
+        setActiveFile(updated)
+      }
+      return updated
+    } catch {
+      return null
+    }
+  }, [])
+
   const handleSwitchWorkspace = async (targetPath: string) => {
     if (!forgeApi?.workspace) return
     try {
@@ -200,6 +213,7 @@ export default function App() {
               onOpenFile={handleOpenFile}
               onSelectFile={handleSelectFile}
               onCloseFile={handleCloseFile}
+              onSaveFile={handleSaveFile}
               onRefreshTree={() => loadTree()}
               onSwitchWorkspace={handleSwitchWorkspace}
             />
