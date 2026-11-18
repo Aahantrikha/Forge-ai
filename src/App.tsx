@@ -142,7 +142,7 @@ export default function App() {
     }
   }
 
-  // Subscribe to native menu bar actions (File > Open Folder, File > Open File)
+  // Subscribe to native menu bar actions (File > Open Folder, File > Open File, File > Save)
   useEffect(() => {
     if (!forgeApi?.workspace) return
     const unsubFolder = forgeApi.workspace.onMenuOpenFolder(() => {
@@ -151,9 +151,13 @@ export default function App() {
     const unsubFile = forgeApi.workspace.onMenuOpenFile(() => {
       void handleOpenFile()
     })
+    const unsubSave = forgeApi.workspace.onMenuSaveFile(() => {
+      window.dispatchEvent(new CustomEvent('forge:save-active-file'))
+    })
     return () => {
       unsubFolder()
       unsubFile()
+      unsubSave()
     }
   }, [handleOpenFolder, handleOpenFile])
 

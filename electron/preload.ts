@@ -60,6 +60,13 @@ const api: ForgeApi = {
         ipcRenderer.off(IpcChannels.menuOpenFile, wrapped)
       }
     },
+    onMenuSaveFile: (listener) => {
+      const wrapped = () => listener()
+      ipcRenderer.on(IpcChannels.menuSaveFile, wrapped)
+      return () => {
+        ipcRenderer.off(IpcChannels.menuSaveFile, wrapped)
+      }
+    },
   },
   agent: {
     checkAuth: (agentId: AgentId): Promise<AgentAuthStatus> =>

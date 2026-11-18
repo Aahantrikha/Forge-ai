@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FileTreeNode, OpenedFile, WorkspaceInfo } from '../shared/workspace'
 import { EmptyState } from '../components/EmptyState'
 import {
@@ -272,7 +272,7 @@ function FileContentViewer({
     }
   }
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     if (!onSaveFile || !isDirty || isSaving) return
     setIsSaving(true)
     try {
@@ -284,7 +284,26 @@ function FileContentViewer({
     } finally {
       setIsSaving(false)
     }
-  }
+  }, [content, file.path, isDirty, isSaving, onSaveFile])
+
+  // Global Ctrl+S and native menu File > Save listener
+  useEffect(() => {
+    const handleGlobalSave = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        void handleSave()
+      }
+    }
+    const handleMenuSave = () => {
+      void handleSave()
+    }
+    window.addEventListener('keydown', handleGlobalSave)
+    window.addEventListener('forge:save-active-file', handleMenuSave)
+    return () => {
+      window.removeEventListener('keydown', handleGlobalSave)
+      window.removeEventListener('forge:save-active-file', handleMenuSave)
+    }
+  }, [handleSave])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {

@@ -72,6 +72,7 @@ export const IpcChannels = {
   // Native application menu events
   menuOpenFolder: 'forge:menu:open-folder',
   menuOpenFile: 'forge:menu:open-file',
+  menuSaveFile: 'forge:menu:save-file',
 
   // Agent channels (Milestone 3: OpenCode & Agent Abstraction)
   agentCheckAuth: 'forge:agent:check-auth',
@@ -123,6 +124,8 @@ export interface ForgeApi {
     onMenuOpenFolder(listener: () => void): () => void
     /** Subscribe to native menu File > Open File; returns an unsubscribe function. */
     onMenuOpenFile(listener: () => void): () => void
+    /** Subscribe to native menu File > Save; returns an unsubscribe function. */
+    onMenuSaveFile(listener: () => void): () => void
   }
   agent: {
     checkAuth(agentId: AgentId): Promise<AgentAuthStatus>

@@ -116,6 +116,13 @@ function setupApplicationMenu() {
             win?.webContents.send(IpcChannels.menuOpenFile)
           },
         },
+        {
+          label: 'Save',
+          accelerator: 'CmdOrCtrl+S',
+          click: () => {
+            win?.webContents.send(IpcChannels.menuSaveFile)
+          },
+        },
         { type: 'separator' as const },
         isMac ? { role: 'close' as const } : { role: 'quit' as const },
       ],
