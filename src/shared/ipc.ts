@@ -13,6 +13,10 @@
  * handler in main and the bridge function in preload. Nothing else changes.
  */
 
+import type { FileChangeEvent, FileTreeNode, WorkspaceInfo } from './workspace'
+
+export type { FileChangeEvent, FileChangeType, FileTreeNode, WorkspaceInfo } from './workspace'
+
 /** Whitelisted channel names. Every value is used by an explicit handler. */
 export const IpcChannels = {
   appGetInfo: 'forge:app:get-info',
@@ -22,6 +26,13 @@ export const IpcChannels = {
   windowClose: 'forge:window:close',
   windowIsMaximized: 'forge:window:is-maximized',
   windowMaximizedChanged: 'forge:window:maximized-changed',
+
+  // Workspace channels (Milestone 2)
+  workspaceSelectDirectory: 'forge:workspace:select-directory',
+  workspaceGetCurrent: 'forge:workspace:get-current',
+  workspaceSetCurrent: 'forge:workspace:set-current',
+  workspaceGetTree: 'forge:workspace:get-tree',
+  workspaceFileChanged: 'forge:workspace:file-changed',
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -55,5 +66,13 @@ export interface ForgeApi {
     isMaximized(): Promise<boolean>
     /** Subscribe to maximized-state changes; returns an unsubscribe function. */
     onMaximizedChanged(listener: (maximized: boolean) => void): () => void
+  }
+  workspace: {
+    selectDirectory(): Promise<WorkspaceInfo | null>
+    getCurrent(): Promise<WorkspaceInfo | null>
+    setCurrent(path: string): Promise<WorkspaceInfo | null>
+    getTree(rootPath?: string): Promise<FileTreeNode | null>
+    /** Subscribe to workspace file changes; returns an unsubscribe function. */
+    onFileChanged(listener: (event: FileChangeEvent) => void): () => void
   }
 }

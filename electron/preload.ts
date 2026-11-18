@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import { IpcChannels } from '../src/shared/ipc'
-import type { ForgeApi } from '../src/shared/ipc'
+import type { FileChangeEvent, ForgeApi } from '../src/shared/ipc'
 
 /**
  * Security boundary (Forge AI spec §9).
@@ -34,6 +34,19 @@ const api: ForgeApi = {
       ipcRenderer.on(IpcChannels.windowMaximizedChanged, wrapped)
       return () => {
         ipcRenderer.off(IpcChannels.windowMaximizedChanged, wrapped)
+      }
+    },
+  },
+  workspace: {
+    selectDirectory: () => ipcRenderer.invoke(IpcChannels.workspaceSelectDirectory),
+    getCurrent: () => ipcRenderer.invoke(IpcChannels.workspaceGetCurrent),
+    setCurrent: (dirPath: string) => ipcRenderer.invoke(IpcChannels.workspaceSetCurrent, dirPath),
+    getTree: (rootPath?: string) => ipcRenderer.invoke(IpcChannels.workspaceGetTree, rootPath),
+    onFileChanged: (listener) => {
+      const wrapped = (_event: IpcRendererEvent, event: FileChangeEvent) => listener(event)
+      ipcRenderer.on(IpcChannels.workspaceFileChanged, wrapped)
+      return () => {
+        ipcRenderer.off(IpcChannels.workspaceFileChanged, wrapped)
       }
     },
   },

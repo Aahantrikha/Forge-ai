@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu, ipcMain } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { IpcChannels, type AppInfo } from '../src/shared/ipc'
+import { WorkspaceService } from './workspace'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -37,6 +38,7 @@ const SECURITY_STATUS: AppInfo['security'] = {
 }
 
 let win: BrowserWindow | null = null
+const workspaceService = new WorkspaceService(() => win)
 
 function sendMaximized(maximized: boolean) {
   win?.webContents.send(IpcChannels.windowMaximizedChanged, maximized)
@@ -61,6 +63,12 @@ function registerIpcHandlers() {
   })
   ipcMain.on(IpcChannels.windowClose, () => win?.close())
   ipcMain.handle(IpcChannels.windowIsMaximized, () => win?.isMaximized() ?? false)
+
+  // Workspace controls (Milestone 2)
+  ipcMain.handle(IpcChannels.workspaceSelectDirectory, () => workspaceService.selectDirectory())
+  ipcMain.handle(IpcChannels.workspaceGetCurrent, () => workspaceService.getWorkspaceInfo())
+  ipcMain.handle(IpcChannels.workspaceSetCurrent, (_event, dirPath: string) => workspaceService.setCurrent(dirPath))
+  ipcMain.handle(IpcChannels.workspaceGetTree, (_event, customRoot?: string) => workspaceService.getTree(customRoot))
 }
 
 function createWindow() {
@@ -104,6 +112,7 @@ function createWindow() {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
+  workspaceService.dispose()
   if (process.platform !== 'darwin') {
     app.quit()
     win = null

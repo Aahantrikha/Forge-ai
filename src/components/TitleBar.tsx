@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { WorkspaceInfo } from '../shared/workspace'
 import { forgeApi } from '../shared/bridge'
 import {
   CloseIcon,
@@ -11,11 +12,12 @@ import {
 
 interface TitleBarProps {
   sidebarOpen: boolean
+  workspace?: WorkspaceInfo | null
   onToggleSidebar: () => void
 }
 
 /** Frameless-window title bar: brand, window controls, drag region. */
-export function TitleBar({ sidebarOpen, onToggleSidebar }: TitleBarProps) {
+export function TitleBar({ sidebarOpen, workspace, onToggleSidebar }: TitleBarProps) {
   const [maximized, setMaximized] = useState(false)
   const windowApi = forgeApi?.window
   const hasWindowControls = windowApi !== undefined
@@ -49,7 +51,12 @@ export function TitleBar({ sidebarOpen, onToggleSidebar }: TitleBarProps) {
           <ForgeMark size={13} />
         </span>
         <span className="brand-name">Forge AI</span>
-        <span className="brand-stage">Milestone 1</span>
+        <span className="brand-stage">Milestone 2</span>
+        {workspace ? (
+          <span className="titlebar-workspace-chip" title={workspace.path}>
+            {workspace.name}
+          </span>
+        ) : null}
       </div>
       <div className="titlebar-drag" />
       <div className="titlebar-actions">
