@@ -18,35 +18,35 @@ const api: ForgeApi = {
   app: {
     getInfo: () => ipcRenderer.invoke(IpcChannels.appGetInfo),
   },
-  window: {
-    minimize: () => {
-      void ipcRenderer.send(IpcChannels.windowMinimize)
-    },
-    toggleMaximize: () => {
-      void ipcRenderer.send(IpcChannels.windowToggleMaximize)
-    },
-    close: () => {
-      void ipcRenderer.send(IpcChannels.windowClose)
-    },
-    isMaximized: () => ipcRenderer.invoke(IpcChannels.windowIsMaximized),
-    onMaximizedChanged: (listener) => {
-      const wrapped = (_event: IpcRendererEvent, maximized: boolean) => listener(maximized)
-      ipcRenderer.on(IpcChannels.windowMaximizedChanged, wrapped)
-      return () => {
-        ipcRenderer.off(IpcChannels.windowMaximizedChanged, wrapped)
-      }
-    },
-  },
   workspace: {
+    openFolder: () => ipcRenderer.invoke(IpcChannels.workspaceOpenFolder),
+    openFile: () => ipcRenderer.invoke(IpcChannels.workspaceOpenFile),
     selectDirectory: () => ipcRenderer.invoke(IpcChannels.workspaceSelectDirectory),
+    selectFile: () => ipcRenderer.invoke(IpcChannels.workspaceOpenFile),
     getCurrent: () => ipcRenderer.invoke(IpcChannels.workspaceGetCurrent),
     setCurrent: (dirPath: string) => ipcRenderer.invoke(IpcChannels.workspaceSetCurrent, dirPath),
     getTree: (rootPath?: string) => ipcRenderer.invoke(IpcChannels.workspaceGetTree, rootPath),
+    readDirectory: (rootPath?: string) => ipcRenderer.invoke(IpcChannels.workspaceGetTree, rootPath),
+    readFile: (filePath: string) => ipcRenderer.invoke(IpcChannels.workspaceReadFile, filePath),
     onFileChanged: (listener) => {
       const wrapped = (_event: IpcRendererEvent, event: FileChangeEvent) => listener(event)
       ipcRenderer.on(IpcChannels.workspaceFileChanged, wrapped)
       return () => {
         ipcRenderer.off(IpcChannels.workspaceFileChanged, wrapped)
+      }
+    },
+    onMenuOpenFolder: (listener) => {
+      const wrapped = () => listener()
+      ipcRenderer.on(IpcChannels.menuOpenFolder, wrapped)
+      return () => {
+        ipcRenderer.off(IpcChannels.menuOpenFolder, wrapped)
+      }
+    },
+    onMenuOpenFile: (listener) => {
+      const wrapped = () => listener()
+      ipcRenderer.on(IpcChannels.menuOpenFile, wrapped)
+      return () => {
+        ipcRenderer.off(IpcChannels.menuOpenFile, wrapped)
       }
     },
   },

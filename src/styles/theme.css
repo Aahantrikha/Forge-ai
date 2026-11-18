@@ -89,20 +89,20 @@ button, textarea, input { font: inherit; color: inherit; }
    ========================================================================== */
 .titlebar {
   flex: none;
-  height: 42px;
+  height: 40px;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
-  -webkit-app-region: drag;
-  -webkit-user-select: none;
   user-select: none;
+  padding: 0 12px;
 }
 .titlebar-left {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px 0 12px;
+  flex: 1;
+  min-width: 0;
 }
 .brand-mark {
   width: 22px;
@@ -123,11 +123,8 @@ button, textarea, input { font: inherit; color: inherit; }
   border-radius: 999px;
   padding: 1px 8px;
 }
-.titlebar-drag { flex: 1; }
-.titlebar-actions { display: flex; align-items: stretch; }
 
 .icon-btn {
-  -webkit-app-region: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -142,19 +139,22 @@ button, textarea, input { font: inherit; color: inherit; }
 .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .icon-btn.is-on { color: var(--accent); background: var(--accent-soft); }
 
-.titlebar-btn {
-  -webkit-app-region: no-drag;
-  width: 46px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
+.icon-btn-sm {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
 }
-.titlebar-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-.titlebar-btn.close:hover { background: var(--danger); color: #fff; }
+.icon-btn-sm:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
 
 /* ==========================================================================
    Activity rail
@@ -1073,4 +1073,154 @@ button, textarea, input { font: inherit; color: inherit; }
 }
 .icon-spin {
   animation: spin 1s linear infinite;
+}
+
+
+/* Titlebar active file chip */
+.titlebar-file-chip {
+  font-size: 11px;
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  border-radius: 999px;
+  padding: 1px 8px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sidebar explorer header buttons */
+.sidebar-header-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-workspace-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--bg-raised);
+  border-radius: var(--radius-sm);
+  margin: 0 4px 6px;
+  border: 1px solid var(--border);
+}
+
+.sidebar-file-tree {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 480px;
+}
+
+/* Status bar file info */
+.status-file-info {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+/* ==========================================================================
+   File Content Viewer in Main Workspace
+   ========================================================================== */
+.file-viewer-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-base);
+  overflow: hidden;
+}
+
+.file-viewer-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.file-viewer-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.file-badge {
+  display: inline-flex;
+  align-items: center;
+}
+
+.file-viewer-name {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text-primary);
+}
+
+.file-viewer-path {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.file-viewer-code-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: auto;
+  background: #090b0e;
+}
+
+.file-viewer-lines {
+  flex: none;
+  padding: 14px 10px 14px 14px;
+  background: #07080a;
+  border-right: 1px solid var(--border);
+  text-align: right;
+  user-select: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--text-muted);
+}
+
+.line-number {
+  height: 20px;
+}
+
+.file-viewer-code {
+  flex: 1;
+  margin: 0;
+  padding: 14px 16px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 20px;
+  color: #e2e8f0;
+  overflow: visible;
+  tab-size: 2;
+}
+
+.file-viewer-code code {
+  font-family: inherit;
+  font-size: inherit;
+  white-space: pre;
 }

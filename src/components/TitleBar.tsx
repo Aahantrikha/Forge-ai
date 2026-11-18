@@ -1,40 +1,23 @@
-import { useEffect, useState } from 'react'
 import type { WorkspaceInfo } from '../shared/workspace'
-import { forgeApi } from '../shared/bridge'
-import {
-  CloseIcon,
-  ForgeMark,
-  MaximizeIcon,
-  MinimizeIcon,
-  RestoreIcon,
-  SidebarToggleIcon,
-} from './icons'
+import { ForgeMark, SidebarToggleIcon } from './icons'
 
 interface TitleBarProps {
   sidebarOpen: boolean
   workspace?: WorkspaceInfo | null
+  activeFileName?: string | null
   onToggleSidebar: () => void
 }
 
-/** Frameless-window title bar: brand, window controls, drag region. */
-export function TitleBar({ sidebarOpen, workspace, onToggleSidebar }: TitleBarProps) {
-  const [maximized, setMaximized] = useState(false)
-  const windowApi = forgeApi?.window
-  const hasWindowControls = windowApi !== undefined
-
-  useEffect(() => {
-    if (!windowApi) return
-    let active = true
-    void windowApi.isMaximized().then((value) => {
-      if (active) setMaximized(value)
-    })
-    const unsubscribe = windowApi.onMaximizedChanged(setMaximized)
-    return () => {
-      active = false
-      unsubscribe()
-    }
-  }, [windowApi])
-
+/**
+ * Top header bar: sidebar toggle, branding, milestone stage, and active workspace/file.
+ * Native window controls are handled by the OS window frame.
+ */
+export function TitleBar({
+  sidebarOpen,
+  workspace,
+  activeFileName,
+  onToggleSidebar,
+}: TitleBarProps) {
   return (
     <header className="titlebar">
       <div className="titlebar-left">
@@ -57,27 +40,10 @@ export function TitleBar({ sidebarOpen, workspace, onToggleSidebar }: TitleBarPr
             {workspace.name}
           </span>
         ) : null}
-      </div>
-      <div className="titlebar-drag" />
-      <div className="titlebar-actions">
-        {hasWindowControls ? (
-          <>
-            <button type="button" className="titlebar-btn" onClick={windowApi.minimize} title="Minimize" aria-label="Minimize">
-              <MinimizeIcon size={15} />
-            </button>
-            <button
-              type="button"
-              className="titlebar-btn"
-              onClick={windowApi.toggleMaximize}
-              title={maximized ? 'Restore' : 'Maximize'}
-              aria-label={maximized ? 'Restore' : 'Maximize'}
-            >
-              {maximized ? <RestoreIcon size={15} /> : <MaximizeIcon size={14} />}
-            </button>
-            <button type="button" className="titlebar-btn close" onClick={windowApi.close} title="Close" aria-label="Close">
-              <CloseIcon size={15} />
-            </button>
-          </>
+        {activeFileName ? (
+          <span className="titlebar-file-chip" title={activeFileName}>
+            {activeFileName}
+          </span>
         ) : null}
       </div>
     </header>

@@ -1,20 +1,28 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { FileTreeNode, WorkspaceInfo } from '../shared/workspace'
-import { forgeApi } from '../shared/bridge'
+import { useState } from 'react'
+import type { FileTreeNode, OpenedFile, WorkspaceInfo } from '../shared/workspace'
 import { EmptyState } from '../components/EmptyState'
 import {
+  CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  CloseIcon,
+  CopyIcon,
   FileIcon,
   FolderIcon,
   FolderPlusIcon,
   RefreshIcon,
-  TerminalIcon,
 } from '../components/icons'
 
-interface WorkspaceViewProps {
+export interface WorkspaceViewProps {
   workspace: WorkspaceInfo | null
-  onSelectDirectory: () => Promise<void>
+  tree: FileTreeNode | null
+  activeFile: OpenedFile | null
+  loading: boolean
+  onOpenFolder: () => Promise<void>
+  onOpenFile: () => Promise<void>
+  onSelectFile: (node: FileTreeNode) => Promise<void>
+  onCloseFile: () => void
+  onRefreshTree: () => Promise<void>
   onSwitchWorkspace: (path: string) => Promise<void>
 }
 
@@ -47,66 +55,28 @@ function getFileBadgeColor(ext?: string): string {
     case '.png':
     case '.jpg':
       return '#10b981'
+    case '.py':
+      return '#3b82f6'
+    case '.rs':
+      return '#f97316'
+    case '.go':
+      return '#00add8'
     default:
       return 'var(--text-muted)'
   }
 }
 
-export function WorkspaceView({ workspace, onSelectDirectory, onSwitchWorkspace }: WorkspaceViewProps) {
-  const [tree, setTree] = useState<FileTreeNode | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [selectedFile, setSelectedFile] = useState<FileTreeNode | null>(null)
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set())
-
-  const loadTree = useCallback(async () => {
-    if (!workspace) {
-      setTree(null)
-      setSelectedFile(null)
-      return
-    }
-    setLoading(true)
-    try {
-      const rootNode = await forgeApi?.workspace.getTree()
-      setTree(rootNode ?? null)
-      if (rootNode) {
-        // Expand root by default
-        setExpandedDirs((prev) => {
-          const next = new Set(prev)
-          next.add(rootNode.path)
-          return next
-        })
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [workspace])
-
-  useEffect(() => {
-    void loadTree()
-  }, [loadTree])
-
-  useEffect(() => {
-    if (!forgeApi?.workspace) return
-    const unsubscribe = forgeApi.workspace.onFileChanged(() => {
-      void loadTree()
-    })
-    return () => {
-      unsubscribe()
-    }
-  }, [loadTree])
-
-  const toggleDirectory = (nodePath: string) => {
-    setExpandedDirs((prev) => {
-      const next = new Set(prev)
-      if (next.has(nodePath)) {
-        next.delete(nodePath)
-      } else {
-        next.add(nodePath)
-      }
-      return next
-    })
-  }
-
+/** Main workspace view: displays active file content or workspace overview. */
+export function WorkspaceView({
+  workspace,
+  tree,
+  activeFile,
+  loading,
+  onOpenFolder,
+  onOpenFile,
+  onCloseFile,
+  onSwitchWorkspace,
+}: WorkspaceViewProps) {
   // Count files & folders
   let fileCount = 0
   let dirCount = 0
@@ -136,65 +106,88 @@ export function WorkspaceView({ workspace, onSelectDirectory, onSwitchWorkspace 
           )}
         </div>
         <div className="view-header-actions">
-          {workspace ? (
-            <>
-              <button
-                type="button"
-                className="btn btn-sm"
-                onClick={loadTree}
-                disabled={loading}
-                title="Refresh file tree"
-                aria-label="Refresh file tree"
-              >
-                <RefreshIcon size={14} className={loading ? 'icon-spin' : undefined} />
-                Refresh
-              </button>
-              <button
-                type="button"
-                className="btn btn-sm"
-                onClick={onSelectDirectory}
-                title="Switch project directory"
-              >
-                <FolderIcon size={14} />
-                Switch project
-              </button>
-              {workspace.recentPaths.filter((p) => p !== workspace.path).length > 0 ? (
-                <div className="quick-switch-group">
-                  {workspace.recentPaths
-                    .filter((p) => p !== workspace.path)
-                    .slice(0, 2)
-                    .map((p) => {
-                      const base = p.split(/[/\\]/).filter(Boolean).pop() || p
-                      return (
-                        <button
-                          key={p}
-                          type="button"
-                          className="btn btn-sm"
-                          onClick={() => void onSwitchWorkspace(p)}
-                          title={`Switch to ${p}`}
-                        >
-                          {base}
-                        </button>
-                      )
-                    })}
-                </div>
-              ) : null}
-            </>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              onClick={onSelectDirectory}
-              title="Open a project"
-            >
-              <FolderPlusIcon size={14} />
-              Open project
-            </button>
-          )}
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={onOpenFile}
+            title="Open a single file (Ctrl+Shift+O)"
+          >
+            <FileIcon size={14} />
+            Open File
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={onOpenFolder}
+            title="Open project directory (Ctrl+O)"
+          >
+            <FolderPlusIcon size={14} />
+            {workspace ? 'Switch Folder' : 'Open Folder'}
+          </button>
         </div>
       </header>
 
-      {!workspace ? (
+      {activeFile ? (
+        <FileContentViewer file={activeFile} onClose={onCloseFile} />
+      ) : workspace ? (
+        <div className="centered-content">
+          <div className="panel project-launcher">
+            <span className="launcher-icon">
+              <FolderIcon size={34} />
+            </span>
+            <h2>{workspace.name}</h2>
+            <p className="launcher-body" title={workspace.path}>
+              {workspace.path}
+            </p>
+            <p className="launcher-hint">
+              {loading
+                ? 'Loading files…'
+                : `${fileCount} files, ${dirCount} folders indexed in workspace.`}
+            </p>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+              <button type="button" className="btn btn-sm" onClick={onOpenFile}>
+                <FileIcon size={14} />
+                Open File…
+              </button>
+              <button type="button" className="btn btn-sm btn-primary" onClick={onOpenFolder}>
+                <FolderPlusIcon size={14} />
+                Switch Folder…
+              </button>
+            </div>
+            <p className="launcher-hint" style={{ marginTop: '12px' }}>
+              &larr; Click any file in the sidebar explorer to view its contents.
+            </p>
+          </div>
+
+          {workspace.recentPaths.filter((p) => p !== workspace.path).length > 0 ? (
+            <div className="feature-list" style={{ marginTop: '12px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
+                RECENT WORKSPACES
+              </div>
+              {workspace.recentPaths
+                .filter((p) => p !== workspace.path)
+                .slice(0, 3)
+                .map((p) => {
+                  const base = p.split(/[/\\]/).filter(Boolean).pop() || p
+                  return (
+                    <li
+                      key={p}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => void onSwitchWorkspace(p)}
+                      title={`Switch to ${p}`}
+                    >
+                      <FeatureBullet />
+                      <span>{base}</span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                        {p}
+                      </span>
+                    </li>
+                  )
+                })}
+            </div>
+          ) : null}
+        </div>
+      ) : (
         <div className="centered-content">
           <div className="panel project-launcher">
             <span className="launcher-icon">
@@ -205,107 +198,37 @@ export function WorkspaceView({ workspace, onSelectDirectory, onSwitchWorkspace 
               Agents operate in exactly one local workspace at a time. All file browsing, code edits, terminal commands,
               and agent actions are safely scoped to your selected project folder.
             </p>
-            <button type="button" className="btn btn-primary" onClick={onSelectDirectory}>
-              <FolderPlusIcon size={16} />
-              Open project…
-            </button>
-            <p className="launcher-hint">Select any folder on your machine to begin.</p>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+              <button type="button" className="btn btn-primary" onClick={onOpenFolder}>
+                <FolderPlusIcon size={16} />
+                Open folder…
+              </button>
+              <button type="button" className="btn" onClick={onOpenFile}>
+                <FileIcon size={16} />
+                Open file…
+              </button>
+            </div>
+            <p className="launcher-hint">Select any folder or file on your machine to begin.</p>
           </div>
 
-          {workspace === null && (
-            <ul className="feature-list">
-              <li>
-                <FeatureBullet />
-                Native folder selection with directory traversal guard
-              </li>
-              <li>
-                <FeatureBullet />
-                Real-time file tree browsing with auto-refresh on changes
-              </li>
-              <li>
-                <FeatureBullet />
-                Scoped workspace boundaries for agent operations
-              </li>
-              <li>
-                <FeatureBullet />
-                Integrated terminal (Milestone 6) &amp; Diff review (Milestone 7)
-              </li>
-            </ul>
-          )}
-        </div>
-      ) : (
-        <div className="workspace-layout">
-          <div className="workspace-tree-pane">
-            <div className="workspace-pane-header">
-              <span className="pane-title">Files</span>
-              <span className="pane-meta">
-                {fileCount} files, {dirCount} folders
-              </span>
-            </div>
-            <div className="workspace-tree-scroll">
-              {loading && !tree ? (
-                <div className="tree-loading">Loading project structure…</div>
-              ) : tree ? (
-                <TreeNodeItem
-                  node={tree}
-                  depth={0}
-                  expandedDirs={expandedDirs}
-                  selectedPath={selectedFile?.path ?? null}
-                  onToggleDir={toggleDirectory}
-                  onSelectFile={setSelectedFile}
-                />
-              ) : (
-                <div className="tree-empty">Empty directory or unreadable structure</div>
-              )}
-            </div>
-          </div>
-
-          <div className="workspace-detail-pane">
-            {selectedFile ? (
-              <div className="file-detail-card panel">
-                <div className="file-detail-header">
-                  <div className="file-detail-icon" style={{ color: getFileBadgeColor(selectedFile.extension) }}>
-                    <FileIcon size={24} />
-                  </div>
-                  <div className="file-detail-info">
-                    <h2 className="file-detail-name">{selectedFile.name}</h2>
-                    <span className="file-detail-path">{selectedFile.relativePath}</span>
-                  </div>
-                </div>
-                <div className="file-meta-grid">
-                  <div className="meta-item">
-                    <span className="meta-label">Type</span>
-                    <span className="meta-value">{selectedFile.extension || 'Plain file'}</span>
-                  </div>
-                  <div className="meta-item">
-                    <span className="meta-label">Size</span>
-                    <span className="meta-value">{formatBytes(selectedFile.size)}</span>
-                  </div>
-                  <div className="meta-item">
-                    <span className="meta-label">Full path</span>
-                    <span className="meta-value path-truncate" title={selectedFile.path}>
-                      {selectedFile.path}
-                    </span>
-                  </div>
-                </div>
-                <div className="callout callout-info" style={{ marginTop: '16px' }}>
-                  <strong>Milestone 2 Active:</strong> File viewing and editing arrive in Milestone 6 &amp; 7 with
-                  diff viewer and git integration. Agent operations are now locked to this workspace.
-                </div>
-              </div>
-            ) : (
-              <div className="empty-state">
-                <div className="empty-icon">
-                  <FolderIcon size={36} />
-                </div>
-                <h3>{workspace.name}</h3>
-                <p>Select a file from the explorer to view details.</p>
-                <p className="empty-hint">
-                  {fileCount} files indexed in workspace &bull; Auto-watching for changes
-                </p>
-              </div>
-            )}
-          </div>
+          <ul className="feature-list">
+            <li>
+              <FeatureBullet />
+              Native folder &amp; file selection with directory traversal guard
+            </li>
+            <li>
+              <FeatureBullet />
+              Sidebar file tree explorer with real-time file viewing in workspace
+            </li>
+            <li>
+              <FeatureBullet />
+              Scoped workspace boundaries for agent operations
+            </li>
+            <li>
+              <FeatureBullet />
+              Integrated terminal (Milestone 6) &amp; Diff review (Milestone 7)
+            </li>
+          </ul>
         </div>
       )}
     </section>
@@ -316,7 +239,211 @@ function FeatureBullet() {
   return <span className="feature-dot" aria-hidden="true" />
 }
 
-interface TreeNodeItemProps {
+/** Full-featured file content viewer with line numbers and copy functionality. */
+function FileContentViewer({ file, onClose }: { file: OpenedFile; onClose: () => void }) {
+  const [copied, setCopied] = useState(false)
+  const lines = file.content.split('\n')
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(file.content)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="file-viewer-container">
+      <div className="file-viewer-header">
+        <div className="file-viewer-meta">
+          <span className="file-badge" style={{ color: getFileBadgeColor(file.extension) }}>
+            <FileIcon size={16} />
+          </span>
+          <span className="file-viewer-name">{file.name}</span>
+          <span className="file-viewer-path" title={file.path}>
+            {file.relativePath}
+          </span>
+          <span className="badge badge-planned">{formatBytes(file.size)}</span>
+          <span className="badge badge-planned">{file.lineCount} lines</span>
+        </div>
+        <div className="file-viewer-actions">
+          <button type="button" className="btn btn-sm" onClick={handleCopy} title="Copy file contents">
+            {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+          <button type="button" className="icon-btn-sm" onClick={onClose} title="Close file viewer" aria-label="Close file viewer">
+            <CloseIcon size={14} />
+          </button>
+        </div>
+      </div>
+      <div className="file-viewer-code-wrap">
+        <div className="file-viewer-lines" aria-hidden="true">
+          {lines.map((_, i) => (
+            <div key={i} className="line-number">
+              {i + 1}
+            </div>
+          ))}
+        </div>
+        <pre className="file-viewer-code">
+          <code>{file.content}</code>
+        </pre>
+      </div>
+    </div>
+  )
+}
+
+export interface WorkspaceSidebarProps {
+  workspace: WorkspaceInfo | null
+  tree: FileTreeNode | null
+  activeFile: OpenedFile | null
+  loading: boolean
+  onOpenFolder: () => Promise<void>
+  onOpenFile: () => Promise<void>
+  onSelectFile: (node: FileTreeNode) => Promise<void>
+  onRefreshTree: () => Promise<void>
+  onSwitchWorkspace: (path: string) => Promise<void>
+}
+
+/** Sidebar for the workspace view: renders the interactive File Tree in the sidebar. */
+export function WorkspaceSidebar({
+  workspace,
+  tree,
+  activeFile,
+  loading,
+  onOpenFolder,
+  onOpenFile,
+  onSelectFile,
+  onRefreshTree,
+  onSwitchWorkspace,
+}: WorkspaceSidebarProps) {
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => {
+    const s = new Set<string>()
+    if (tree?.path) s.add(tree.path)
+    return s
+  })
+
+  const toggleDirectory = (nodePath: string) => {
+    setExpandedDirs((prev) => {
+      const next = new Set(prev)
+      if (next.has(nodePath)) {
+        next.delete(nodePath)
+      } else {
+        next.add(nodePath)
+      }
+      return next
+    })
+  }
+
+  return (
+    <>
+      <div className="sidebar-header">
+        <span className="sidebar-title">Explorer</span>
+        <div className="sidebar-header-buttons">
+          <button
+            type="button"
+            className="icon-btn-sm"
+            onClick={onOpenFolder}
+            title="Open Folder (Ctrl+O)"
+            aria-label="Open Folder"
+          >
+            <FolderPlusIcon size={14} />
+          </button>
+          <button
+            type="button"
+            className="icon-btn-sm"
+            onClick={onOpenFile}
+            title="Open File (Ctrl+Shift+O)"
+            aria-label="Open File"
+          >
+            <FileIcon size={14} />
+          </button>
+          {workspace ? (
+            <button
+              type="button"
+              className="icon-btn-sm"
+              onClick={onRefreshTree}
+              title="Refresh File Tree"
+              aria-label="Refresh File Tree"
+              disabled={loading}
+            >
+              <RefreshIcon size={13} className={loading ? 'icon-spin' : undefined} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="sidebar-body">
+        {workspace ? (
+          <div className="sidebar-section" style={{ padding: '4px 0' }}>
+            <div className="sidebar-workspace-label" title={workspace.path}>
+              <FolderIcon size={14} />
+              <span className="workspace-label-text">{workspace.name}</span>
+            </div>
+
+            <div className="sidebar-file-tree">
+              {loading && !tree ? (
+                <div className="tree-loading">Loading files…</div>
+              ) : tree ? (
+                <SidebarTreeNode
+                  node={tree}
+                  depth={0}
+                  expandedDirs={expandedDirs}
+                  selectedPath={activeFile?.path ?? null}
+                  onToggleDir={toggleDirectory}
+                  onSelectFile={onSelectFile}
+                />
+              ) : (
+                <div className="tree-empty">Empty directory</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="sidebar-section">
+            <EmptyState
+              compact
+              icon={<FolderIcon size={26} />}
+              title="No folder opened"
+              body="Open a directory to explore files and start agent sessions."
+            />
+            <div style={{ textAlign: 'center', marginTop: '10px' }}>
+              <button type="button" className="btn btn-sm btn-primary" onClick={onOpenFolder}>
+                <FolderPlusIcon size={13} />
+                Open Folder…
+              </button>
+            </div>
+          </div>
+        )}
+
+        {workspace?.recentPaths && workspace.recentPaths.length > 0 ? (
+          <div className="sidebar-section">
+            <span className="sidebar-title">Recent</span>
+            <div className="recent-projects-list">
+              {workspace.recentPaths.slice(0, 5).map((recentPath) => {
+                const name = recentPath.split(/[/\\]/).filter(Boolean).pop() || recentPath
+                const isCurrent = workspace.path === recentPath
+                return (
+                  <button
+                    key={recentPath}
+                    type="button"
+                    className={`recent-project-item${isCurrent ? ' active' : ''}`}
+                    onClick={() => onSwitchWorkspace(recentPath)}
+                    title={recentPath}
+                  >
+                    <div className="recent-project-main">
+                      <span className="recent-project-name">{name}</span>
+                      <span className="recent-project-path">{recentPath}</span>
+                    </div>
+                    {isCurrent ? <span className="badge badge-planned">Active</span> : null}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </>
+  )
+}
+
+interface SidebarTreeNodeProps {
   node: FileTreeNode
   depth: number
   expandedDirs: Set<string>
@@ -325,14 +452,14 @@ interface TreeNodeItemProps {
   onSelectFile: (node: FileTreeNode) => void
 }
 
-function TreeNodeItem({
+function SidebarTreeNode({
   node,
   depth,
   expandedDirs,
   selectedPath,
   onToggleDir,
   onSelectFile,
-}: TreeNodeItemProps) {
+}: SidebarTreeNodeProps) {
   const isDirectory = node.type === 'directory'
   const isExpanded = expandedDirs.has(node.path)
   const isSelected = selectedPath === node.path
@@ -343,21 +470,21 @@ function TreeNodeItem({
         <button
           type="button"
           className={`tree-item dir-item${isSelected ? ' is-selected' : ''}`}
-          style={{ paddingLeft: `${depth * 14 + 10}px` }}
+          style={{ paddingLeft: `${depth * 12 + 6}px` }}
           onClick={() => onToggleDir(node.path)}
         >
           <span className="tree-chevron">
-            {isExpanded ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}
+            {isExpanded ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
           </span>
           <span className="tree-icon dir-icon">
-            <FolderIcon size={14} />
+            <FolderIcon size={13} />
           </span>
           <span className="tree-label">{node.name}</span>
         </button>
         {isExpanded && node.children && node.children.length > 0 ? (
           <div className="tree-children">
             {node.children.map((child) => (
-              <TreeNodeItem
+              <SidebarTreeNode
                 key={child.path}
                 node={child}
                 depth={depth + 1}
@@ -379,100 +506,15 @@ function TreeNodeItem({
     <button
       type="button"
       className={`tree-item file-item${isSelected ? ' is-selected' : ''}`}
-      style={{ paddingLeft: `${depth * 14 + 10}px` }}
+      style={{ paddingLeft: `${depth * 12 + 6}px` }}
       onClick={() => onSelectFile(node)}
+      title={`${node.name} (${formatBytes(node.size)})`}
     >
       <span className="tree-chevron spacer" />
       <span className="tree-icon file-icon" style={{ color: badgeColor }}>
-        <FileIcon size={14} />
+        <FileIcon size={13} />
       </span>
       <span className="tree-label">{node.name}</span>
-      {node.size ? <span className="tree-size">{formatBytes(node.size)}</span> : null}
     </button>
-  )
-}
-
-interface WorkspaceSidebarProps {
-  workspace: WorkspaceInfo | null
-  onSelectDirectory: () => Promise<void>
-  onSwitchWorkspace: (path: string) => Promise<void>
-}
-
-/** Sidebar for the workspace view: active project info & recent projects list. */
-export function WorkspaceSidebar({ workspace, onSelectDirectory, onSwitchWorkspace }: WorkspaceSidebarProps) {
-  return (
-    <>
-      <div className="sidebar-header">
-        <span className="sidebar-title">Project</span>
-        <button
-          type="button"
-          className="btn btn-sm btn-primary"
-          onClick={onSelectDirectory}
-          title="Open project folder"
-        >
-          <FolderPlusIcon size={13} />
-          Open
-        </button>
-      </div>
-
-      <div className="sidebar-body">
-        {workspace ? (
-          <div className="sidebar-section">
-            <div className="active-project-card">
-              <div className="project-card-top">
-                <FolderIcon size={16} />
-                <span className="project-card-name">{workspace.name}</span>
-              </div>
-              <p className="project-card-path" title={workspace.path}>
-                {workspace.path}
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="sidebar-section">
-            <EmptyState
-              compact
-              icon={<FolderIcon size={26} />}
-              title="No project open"
-              body="Open a directory to explore files and start agent sessions."
-            />
-          </div>
-        )}
-
-        <div className="sidebar-section">
-          <span className="sidebar-title">Recent projects</span>
-          {workspace?.recentPaths && workspace.recentPaths.length > 0 ? (
-            <div className="recent-projects-list">
-              {workspace.recentPaths.map((recentPath) => {
-                const name = recentPath.split(/[/\\]/).filter(Boolean).pop() || recentPath
-                const isCurrent = workspace.path === recentPath
-                return (
-                  <button
-                    key={recentPath}
-                    type="button"
-                    className={`recent-project-item${isCurrent ? ' active' : ''}`}
-                    onClick={() => onSwitchWorkspace(recentPath)}
-                    title={recentPath}
-                  >
-                    <div className="recent-project-main">
-                      <span className="recent-project-name">{name}</span>
-                      <span className="recent-project-path">{recentPath}</span>
-                    </div>
-                    {isCurrent ? <span className="badge badge-planned">Active</span> : null}
-                  </button>
-                )
-              })}
-            </div>
-          ) : (
-            <EmptyState
-              compact
-              icon={<TerminalIcon size={24} />}
-              title="No recent projects"
-              body="Recently opened directories will be remembered here."
-            />
-          )}
-        </div>
-      </div>
-    </>
   )
 }

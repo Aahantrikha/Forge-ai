@@ -1,8 +1,24 @@
-import { app, BrowserWindow, Menu, ipcMain } from 'electron'
+import { app, BrowserWindow, Menu, dialog, ipcMain } from 'electron'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { IpcChannels, type AppInfo } from '../src/shared/ipc'
 import { WorkspaceService } from './workspace'
+
+const logPath = path.join(app.getPath('userData'), 'electron-debug.log')
+try {
+  fs.writeFileSync(logPath, `[${new Date().toISOString()}] Main process initialized\n`)
+} catch {
+  // Ignored if userData is not yet created
+}
+
+function debugLog(msg: string) {
+  try {
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`)
+  } catch {
+    // Ignore
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -40,10 +56,6 @@ const SECURITY_STATUS: AppInfo['security'] = {
 let win: BrowserWindow | null = null
 const workspaceService = new WorkspaceService(() => win)
 
-function sendMaximized(maximized: boolean) {
-  win?.webContents.send(IpcChannels.windowMaximizedChanged, maximized)
-}
-
 function registerIpcHandlers() {
   // Application info (used by the settings screen + status bar).
   ipcMain.handle(IpcChannels.appGetInfo, (): AppInfo => ({
@@ -54,32 +66,112 @@ function registerIpcHandlers() {
     security: SECURITY_STATUS,
   }))
 
-  // Window controls, driven by the frameless custom titlebar.
-  ipcMain.on(IpcChannels.windowMinimize, () => win?.minimize())
-  ipcMain.on(IpcChannels.windowToggleMaximize, () => {
-    if (!win) return
-    if (win.isMaximized()) win.unmaximize()
-    else win.maximize()
-  })
-  ipcMain.on(IpcChannels.windowClose, () => win?.close())
-  ipcMain.handle(IpcChannels.windowIsMaximized, () => win?.isMaximized() ?? false)
-
-  // Workspace controls (Milestone 2)
+  // Workspace controls (Milestone 2 - End-to-End Folder & File operations)
+  ipcMain.handle(IpcChannels.workspaceOpenFolder, () => workspaceService.openFolder())
+  ipcMain.handle(IpcChannels.workspaceOpenFile, () => workspaceService.openFile())
+  ipcMain.handle(IpcChannels.workspaceReadFile, (_event, filePath: string) => workspaceService.readFile(filePath))
   ipcMain.handle(IpcChannels.workspaceSelectDirectory, () => workspaceService.selectDirectory())
   ipcMain.handle(IpcChannels.workspaceGetCurrent, () => workspaceService.getWorkspaceInfo())
   ipcMain.handle(IpcChannels.workspaceSetCurrent, (_event, dirPath: string) => workspaceService.setCurrent(dirPath))
   ipcMain.handle(IpcChannels.workspaceGetTree, (_event, customRoot?: string) => workspaceService.getTree(customRoot))
 }
 
+function setupApplicationMenu() {
+  const isMac = process.platform === 'darwin'
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: 'appMenu' as const }] : []),
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Open Folder...',
+          accelerator: 'CmdOrCtrl+O',
+          click: () => {
+            win?.webContents.send(IpcChannels.menuOpenFolder)
+          },
+        },
+        {
+          label: 'Open File...',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => {
+            win?.webContents.send(IpcChannels.menuOpenFile)
+          },
+        },
+        { type: 'separator' as const },
+        isMac ? { role: 'close' as const } : { role: 'quit' as const },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' as const },
+        { role: 'redo' as const },
+        { type: 'separator' as const },
+        { role: 'cut' as const },
+        { role: 'copy' as const },
+        { role: 'paste' as const },
+        { role: 'selectAll' as const },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' as const },
+        { role: 'forceReload' as const },
+        { role: 'toggleDevTools' as const },
+        { type: 'separator' as const },
+        { role: 'resetZoom' as const },
+        { role: 'zoomIn' as const },
+        { role: 'zoomOut' as const },
+        { type: 'separator' as const },
+        { role: 'togglefullscreen' as const },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' as const },
+        { role: 'zoom' as const },
+        ...(isMac ? [{ type: 'separator' as const }, { role: 'front' as const }] : [{ role: 'close' as const }]),
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'About Forge AI',
+          click: () => {
+            if (win) {
+              dialog.showMessageBox(win, {
+                type: 'info',
+                title: 'About Forge AI',
+                message: `Forge AI v${app.getVersion()}`,
+                detail:
+                  'Local-first, open-source desktop AI coding environment for Windows.\nElectron ' +
+                  (process.versions.electron ?? ''),
+              })
+            }
+          },
+        },
+      ],
+    },
+  ]
+
+  const menu = Menu.buildFromTemplate(template)
+  Menu.setApplicationMenu(menu)
+}
+
 function createWindow() {
+  debugLog('createWindow called')
   const iconPath = path.join(process.env.APP_ROOT, 'public', 'forge.svg')
 
+  // Keep native OS window frame intact — frame: true provides native OS window controls
   win = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1080,
     minHeight: 680,
-    frame: false, // custom titlebar below (frameless window)
+    frame: true,
     show: true,
     center: true,
     backgroundColor: '#0e1013',
@@ -95,6 +187,7 @@ function createWindow() {
     },
   })
 
+  debugLog(`BrowserWindow created. ID: ${win.id}`)
   win.center()
   win.setAlwaysOnTop(true)
   win.show()
@@ -103,25 +196,25 @@ function createWindow() {
     win?.setAlwaysOnTop(false)
   }, 1000)
 
-  win.on('maximize', () => sendMaximized(true))
-  win.on('unmaximize', () => sendMaximized(false))
-
   // Navigation guards (§9): no popups, no in-page navigation to remote pages.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (event) => event.preventDefault())
 
   win.webContents.on('did-finish-load', () => {
+    debugLog('webContents did-finish-load')
     win?.show()
     win?.focus()
   })
 
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
-    console.error(`Page failed to load (${errorCode}): ${errorDescription}`)
+    debugLog(`webContents did-fail-load: ${errorCode} - ${errorDescription}`)
   })
 
   if (VITE_DEV_SERVER_URL) {
+    debugLog(`Loading dev URL: ${VITE_DEV_SERVER_URL}`)
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
+    debugLog(`Loading file: ${path.join(RENDERER_DIST, 'index.html')}`)
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
 }
@@ -138,19 +231,14 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  // On OS X it's common to re-create a window in the app when the
-  // dock icon is clicked and there are no other windows open.
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow()
   }
 })
 
 app.whenReady().then(() => {
-  // In production, remove the default menu entirely (reduces attack surface
-  // and removes DevTools shortcuts). Kept in development for debugging.
-  if (!isDevelopment) {
-    Menu.setApplicationMenu(null)
-  }
+  debugLog('app.whenReady resolved')
+  setupApplicationMenu()
   registerIpcHandlers()
   createWindow()
 })

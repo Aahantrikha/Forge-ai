@@ -1,18 +1,24 @@
 import { AGENTS, getAgent, type AgentId } from '../app/agents'
-import type { WorkspaceInfo } from '../shared/workspace'
-import { FolderIcon } from './icons'
+import type { OpenedFile, WorkspaceInfo } from '../shared/workspace'
+import { FileIcon, FolderIcon } from './icons'
 
 interface StatusBarProps {
   selectedAgent: AgentId | null
   workspace: WorkspaceInfo | null
-  onOpenWorkspace: () => void
+  activeFile?: OpenedFile | null
+  onOpenFolder: () => void
 }
 
 /**
  * Bottom status bar: workspace status + per-agent availability.
- * Reflects active project path and real registry state.
+ * Clicking the workspace button triggers the native folder picker.
  */
-export function StatusBar({ selectedAgent, workspace, onOpenWorkspace }: StatusBarProps) {
+export function StatusBar({
+  selectedAgent,
+  workspace,
+  activeFile,
+  onOpenFolder,
+}: StatusBarProps) {
   const selected = getAgent(selectedAgent)
 
   return (
@@ -20,14 +26,31 @@ export function StatusBar({ selectedAgent, workspace, onOpenWorkspace }: StatusB
       <button
         type="button"
         className="status-item status-button"
-        onClick={onOpenWorkspace}
-        title={workspace ? `Workspace: ${workspace.path}` : 'Click to select project folder'}
+        onClick={onOpenFolder}
+        title={
+          workspace
+            ? `Active workspace: ${workspace.path} (Click to change folder)`
+            : 'Click to select and open a project folder'
+        }
       >
         <FolderIcon size={13} />
         <span className="status-workspace-name">
           {workspace ? workspace.name : 'No project open — Click to select'}
         </span>
       </button>
+
+      {activeFile ? (
+        <>
+          <span className="status-sep" />
+          <span className="status-item status-file-info" title={activeFile.path}>
+            <FileIcon size={12} />
+            <span>
+              {activeFile.name} ({activeFile.lineCount} lines)
+            </span>
+          </span>
+        </>
+      ) : null}
+
       <span className="status-sep" />
       <div className="statusbar-agents">
         <span className="status-item">Agents:</span>

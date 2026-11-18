@@ -18,6 +18,21 @@ export interface FileTreeNode {
   extension?: string
 }
 
+export interface OpenedFile {
+  path: string
+  name: string
+  relativePath: string
+  content: string
+  size: number
+  extension: string
+  lineCount: number
+}
+
+export interface WorkspaceOpenResult {
+  workspace: WorkspaceInfo
+  tree: FileTreeNode
+}
+
 export type FileChangeType = 'add' | 'change' | 'unlink' | 'addDir' | 'unlinkDir'
 
 export interface FileChangeEvent {

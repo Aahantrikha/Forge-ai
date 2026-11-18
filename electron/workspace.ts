@@ -2,7 +2,13 @@ import { app, dialog, type BrowserWindow } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { IpcChannels } from '../src/shared/ipc'
-import type { FileChangeEvent, FileTreeNode, WorkspaceInfo } from '../src/shared/workspace'
+import type {
+  FileChangeEvent,
+  FileTreeNode,
+  OpenedFile,
+  WorkspaceInfo,
+  WorkspaceOpenResult,
+} from '../src/shared/workspace'
 
 const IGNORED_NAMES = new Set([
   '.git',
@@ -84,7 +90,7 @@ export class WorkspaceService {
     }
   }
 
-  public async selectDirectory(): Promise<WorkspaceInfo | null> {
+  public async openFolder(): Promise<WorkspaceOpenResult | null> {
     const win = this.getWindow()
     const options: Electron.OpenDialogOptions = {
       title: 'Open Project Folder',
@@ -93,10 +99,108 @@ export class WorkspaceService {
     const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
 
     if (result.canceled || result.filePaths.length === 0) {
-      return this.getWorkspaceInfo()
+      return null
     }
 
-    return this.setCurrent(result.filePaths[0])
+    const ws = this.setCurrent(result.filePaths[0])
+    if (!ws) return null
+
+    const tree = this.getTree(ws.path)
+    if (!tree) return null
+
+    return { workspace: ws, tree }
+  }
+
+  public async openFile(): Promise<OpenedFile | null> {
+    const win = this.getWindow()
+    const options: Electron.OpenDialogOptions = {
+      title: 'Open File',
+      properties: ['openFile'],
+    }
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+
+    return this.readFile(result.filePaths[0])
+  }
+
+  public readFile(targetPath: string): OpenedFile | null {
+    try {
+      const resolved = path.resolve(targetPath)
+      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+        return null
+      }
+
+      const stats = fs.statSync(resolved)
+      const ext = path.extname(resolved).toLowerCase()
+      const relPath = this.currentPath
+        ? path.relative(this.currentPath, resolved).replace(/\\/g, '/')
+        : path.basename(resolved)
+
+      // Guard against huge files
+      if (stats.size > 10 * 1024 * 1024) {
+        return {
+          path: resolved,
+          name: path.basename(resolved),
+          relativePath: relPath,
+          content: '/* File is larger than 10MB. Displaying raw text disabled for performance. */',
+          size: stats.size,
+          extension: ext,
+          lineCount: 1,
+        }
+      }
+
+      // Check binary extensions
+      const binaryExts = new Set([
+        '.png',
+        '.jpg',
+        '.jpeg',
+        '.gif',
+        '.ico',
+        '.pdf',
+        '.zip',
+        '.tar',
+        '.gz',
+        '.7z',
+        '.exe',
+        '.dll',
+        '.bin',
+        '.wasm',
+      ])
+      if (binaryExts.has(ext)) {
+        return {
+          path: resolved,
+          name: path.basename(resolved),
+          relativePath: relPath,
+          content: `/* Binary file (${ext}): preview not available as plain text. Size: ${stats.size} bytes */`,
+          size: stats.size,
+          extension: ext,
+          lineCount: 1,
+        }
+      }
+
+      const content = fs.readFileSync(resolved, 'utf-8')
+      const lines = content.split('\n')
+
+      return {
+        path: resolved,
+        name: path.basename(resolved),
+        relativePath: relPath,
+        content,
+        size: stats.size,
+        extension: ext,
+        lineCount: lines.length,
+      }
+    } catch {
+      return null
+    }
+  }
+
+  public async selectDirectory(): Promise<WorkspaceInfo | null> {
+    const res = await this.openFolder()
+    return res ? res.workspace : this.getWorkspaceInfo()
   }
 
   public setCurrent(dirPath: string): WorkspaceInfo | null {

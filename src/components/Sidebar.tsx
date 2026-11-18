@@ -1,5 +1,5 @@
 import type { ViewId } from '../app/navigation'
-import type { WorkspaceInfo } from '../shared/workspace'
+import type { FileTreeNode, OpenedFile, WorkspaceInfo } from '../shared/workspace'
 import { ChatSidebar } from '../views/ChatView'
 import { HistorySidebar } from '../views/HistoryView'
 import { SettingsSidebar } from '../views/SettingsView'
@@ -8,14 +8,32 @@ import { WorkspaceSidebar } from '../views/WorkspaceView'
 interface SidebarProps {
   view: ViewId
   workspace: WorkspaceInfo | null
+  tree: FileTreeNode | null
+  activeFile: OpenedFile | null
+  loading: boolean
   /** Passed through to sidebars that need the global new-chat action. */
   onNewChat: () => void
-  onSelectDirectory: () => Promise<void>
+  onOpenFolder: () => Promise<void>
+  onOpenFile: () => Promise<void>
+  onSelectFile: (node: FileTreeNode) => Promise<void>
+  onRefreshTree: () => Promise<void>
   onSwitchWorkspace: (path: string) => Promise<void>
 }
 
 /** Contextual sidebar: content is owned by each view module and rendered by view id. */
-export function Sidebar({ view, workspace, onNewChat, onSelectDirectory, onSwitchWorkspace }: SidebarProps) {
+export function Sidebar({
+  view,
+  workspace,
+  tree,
+  activeFile,
+  loading,
+  onNewChat,
+  onOpenFolder,
+  onOpenFile,
+  onSelectFile,
+  onRefreshTree,
+  onSwitchWorkspace,
+}: SidebarProps) {
   return (
     <div className="sidebar">
       {view === 'chat' ? (
@@ -23,7 +41,13 @@ export function Sidebar({ view, workspace, onNewChat, onSelectDirectory, onSwitc
       ) : view === 'workspace' ? (
         <WorkspaceSidebar
           workspace={workspace}
-          onSelectDirectory={onSelectDirectory}
+          tree={tree}
+          activeFile={activeFile}
+          loading={loading}
+          onOpenFolder={onOpenFolder}
+          onOpenFile={onOpenFile}
+          onSelectFile={onSelectFile}
+          onRefreshTree={onRefreshTree}
           onSwitchWorkspace={onSwitchWorkspace}
         />
       ) : view === 'history' ? (
