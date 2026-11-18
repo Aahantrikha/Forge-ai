@@ -1,90 +1,222 @@
-# Forge AI — Unified Agent Protocol Specification (FAP)
+# Forge AI — Agent Protocol Specification
 
-## 1. Specification Overview
+> Version 2.0. Replaces the v1 "Forge Agent Protocol (FAP)", which described a single
+> provider-scoped session contract (`src/shared/agent.ts`). That contract is retained as
+> the *provider* layer underneath this protocol.
 
-The **Forge Agent Protocol (FAP)** defines a standardized, provider-agnostic communication and orchestration standard for autonomous coding agents within Forge AI. 
+## 1. Scope
 
-Rather than enforcing a lowest-common-denominator model that strips unique provider abilities, FAP establishes:
-1. A **Uniform Control Plane**: Consistent lifecycle, session creation, streaming, cancellation, and error handling.
-2. **Provider-Specific Capability Flags**: Precise exposure of capabilities (streaming, tool calls, bash execution, file changes, reasoning tokens, context limits).
-3. **Guaranteed Zero-Cost Prioritization**: Clear mechanical distinction between free community models and paid commercial endpoints.
-4. **Verifiable Activity Telemetry**: Authentic event mapping for tool usage without simulation or fabrication.
+This specification defines how Forge AI creates agents, assigns tasks, routes messages,
+shares context and artifacts, and decides when an agent is genuinely complete. It applies
+to every agent role, whether built-in or dynamically generated.
 
----
+## 2. Identity and roles
 
-## 2. Protocol State Machine
+| Concept | Type | Notes |
+|---|---|---|
+| Provider | `ProviderId` | `opencode` today; future OpenAI, Anthropic, local adapters. |
+| Role profile | `AgentRole` | `architect`, `frontend`, `backend`, `database`, `qa`, `code-reviewer`, `research`, or a generated specialist. |
+| Agent instance | `AgentInstanceId` (UUID) | One dynamic agent in one workflow. Unique per spawn. |
+| Model session | `ModelSessionId` | Provider conversation handle owned by one agent instance. |
+| Task | `TaskId` (UUID) | A node in the workflow dependency graph. |
 
-Every agent session follows a deterministic state machine:
+The old `AgentId = 'opencode' | 'codex' | 'gemini'` union is a provider identifier and is
+deprecated for agent-level use. Codex/Gemini, if added, become providers, not agents.
 
-```
-                  +-----------------------+
-                  |   UNAUTHENTICATED     |
-                  +-----------------------+
-                              |
-                     checkAuth() passes
-                              |
-                              v
-+-------------------------------------------------------------------+
-|                        IDLE / DISCOVERED                          |
-|  - listModels() executed                                          |
-|  - Capabilities registered                                        |
-+-------------------------------------------------------------------+
-                              |
-                    createSession(workspace)
-                              |
-                              v
-+-------------------------------------------------------------------+
-|                        SESSION READY                              |
-|  - Scoped to local workspace path                                 |
-|  - SSE / Stdio event stream attached                              |
-+-------------------------------------------------------------------+
-        |                                             ^
-  submitPrompt()                                  done / idle
-        |                                             |
-        v                                             |
-+-------------------------------------------------------------------+
-|                         GENERATING                                |
-|  - Streams: text_delta                                            |
-|  - Tool activities: tool_activity (read/search/exec/edit)         |
-|  - File changes: file_change                                      |
-+-------------------------------------------------------------------+
-        |                             |
-  Requires Approval               cancel()
-        |                             |
-        v                             v
-+---------------------+     +--------------------+
-|  AWAITING APPROVAL  |     |      ABORTED       |
-+---------------------+     +--------------------+
-        |
-  User Approves/Denies
-        |
-        v
-  Resume Generating
-```
+### 2.1 Role profiles
 
----
+Role profiles are configuration, not hard-coded classes. A profile declares:
 
-## 3. Data Contracts & Type Definitions
+- role name and description
+- system instructions template
+- allowed tools
+- filesystem permission scope
+- default model configuration
+- execution limits (timeout, token budget, max retries, recursion depth)
 
-The protocol data contracts are located in `src/shared/agent.ts`:
+Built-in profiles are the examples in the master directive. The Agent Factory may create
+a dynamic profile from a validated schema when no built-in profile fits; dynamic profiles
+are logged, persisted and subject to the same limits.
 
-### 3.1. Agent Adapter Interface
+## 3. Agent manifest
+
+Every agent instance is created from an immutable manifest:
+
 ```ts
-export type AgentId = 'opencode' | 'codex' | 'gemini'
+interface AgentManifest {
+  id: AgentInstanceId
+  workflowId: WorkflowId
+  role: AgentRole
+  systemInstructions: string
+  modelConfig: { providerId: ProviderId; modelId: string; parameters?: Record<string, unknown> }
+  modelSessionId: ModelSessionId
+  assignedTaskId: TaskId | null
+  availableTools: ToolName[]
+  filesystemPermissions: { roots: string[]; writableOwnership: string[] }
+  workingDirectory: string
+  executionLimits: {
+    timeoutMs: number
+    tokenBudget: number
+    maxRetries: number
+    maxRecursionDepth: number
+  }
+  status: AgentStatus
+  createdAt: number
+  completedAt: number | null
+}
+```
 
-export interface AgentCapabilities {
-  streaming: boolean
-  toolEvents: boolean
-  cancellation: boolean
-  fileChanges: boolean
-  sessionResumption: boolean
-  modelSelection: boolean
+## 4. Lifecycle state machine
+
+```
+             ┌──────────┐
+             │   idle   │
+             └────┬─────┘
+                  │ spawn
+                  ▼
+          ┌───────────────┐
+          │ initializing  │  worktree + session creation
+          └──────┬────────┘
+                 │ ready
+                 ▼
+          ┌───────────────┐    dependency     ┌──────────┐
+          │    running    │ ◄────────────────► │ waiting  │
+          └───┬───────┬───┘                   └──────────┘
+              │       │
+      done/pass│       │blocked/fail/timeout
+              ▼       ▼
+      ┌───────────┐  ┌────────┐
+      │ completed │  │ failed │
+      └───────────┘  └───┬────┘
+                         │ retry (bounded)
+                         ▼
+                    (initializing)
+      ┌────────────┐
+      │ terminated │  explicit cancellation or recovery stop
+      └────────────┘
+```
+
+States: `idle`, `initializing`, `running`, `waiting`, `completed`, `failed`, `terminated`.
+
+Rules:
+
+- An agent transitions to `completed` only when its task's acceptance criteria and
+  required artifacts are verified; a model response alone is not completion.
+- Retries are bounded by `maxRetries`; timeouts and heartbeats are enforced by the
+  Scheduler. Stale agents are moved to `failed` and surfaced to the Recovery Manager.
+- Termination releases the worktree lease, closes the model session and emits an event.
+- Agent creation is capped by configurable global and per-workflow concurrency limits;
+  recursion depth is capped to prevent agents spawning agents indefinitely.
+
+## 5. Task contract
+
+```ts
+interface Task {
+  id: TaskId
+  workflowId: WorkflowId
+  objective: string
+  description: string
+  dependencies: TaskId[]
+  assignedAgentId: AgentInstanceId | null
+  expectedOutput: string
+  acceptanceCriteria: string[]
+  fileOwnership: string[]
+  priority: number
+  executionLimits: ExecutionLimits
+  status: 'pending' | 'ready' | 'running' | 'blocked' | 'review' | 'completed' | 'failed' | 'cancelled'
+}
+```
+
+Tasks are owned by the workflow graph, not by agents. Overlapping `fileOwnership` between
+concurrent tasks is a scheduling conflict: the Dependency Resolver must serialize or
+reassign those tasks rather than allowing two agents to edit the same file.
+
+## 6. Structured messaging
+
+Agents do not read each other's conversation histories. They exchange typed messages and
+shared artifacts through the Message Broker.
+
+```ts
+interface AgentMessage {
+  messageId: string
+  workflowId: WorkflowId
+  senderId: string        // agent instance id, 'orchestrator', or 'user'
+  receiverId: string | null  // null = workflow broadcast
+  type: MessageType
+  taskId: TaskId | null
+  content: string
+  correlationId?: string
+  createdAt: number
 }
 
-export interface AgentAdapter {
-  readonly id: AgentId
-  readonly capabilities: AgentCapabilities
+type MessageType =
+  | 'question' | 'answer' | 'handoff' | 'blocker'
+  | 'status' | 'artifact' | 'clarification'
+```
 
+Rules:
+
+- Every message is persisted before delivery. Consumers must be idempotent on `messageId`.
+- `blocker` messages transition the related task to `blocked` and notify the orchestrator.
+- `handoff` messages carry the receiving task ID and any artifact references needed to
+  continue work; they do not carry full model transcripts.
+- `artifact` messages reference artifacts by ID; content is never inlined into messages.
+
+## 7. Shared context and project memory
+
+`ContextManager` maintains a versioned project memory composed of:
+
+- repository summary and architecture map
+- coding conventions and API contracts
+- relevant file references
+- previous task outcomes
+- known issues and decisions
+
+Context retrieval is selective: an agent receives a task-specific slice plus relevant
+artifacts, selected by role, task and file ownership. The entire repository is never
+sent to a model on every request. Each context snapshot has a version; agents record the
+version they used so reviewers can detect stale context.
+
+## 8. Artifacts
+
+Artifacts are files written under `.forge/workflows/<workflowId>/artifacts/`, referenced
+by ID in SQLite. Kinds include `plan`, `diff`, `patch`, `test_output`, `review_report`,
+`log`, `summary`. Artifacts are immutable once created; a corrected version is a new
+artifact with a `supersedes` reference. The `artifact` message type announces new
+artifacts to the workflow.
+
+## 9. Tool protocol
+
+Agents act only through the registered tool set in their manifest:
+
+`read_file`, `write_file`, `edit_file`, `search_codebase`, `list_directory`,
+`execute_command`, `run_tests`, `inspect_git`, `create_worktree`, `create_artifact`,
+`request_approval`.
+
+Each tool declares a permission level (`read_only`, `controlled`, `sensitive`). The
+Permission Policy Engine evaluates every call before execution:
+
+- read-only tools are allowed inside authorized roots;
+- controlled tools are allowed only on files owned by the agent, inside its worktree;
+- sensitive tools require an approval resolved through the Approval Manager.
+
+Tool results are normalized into events and artifacts. Tool output is untrusted data and
+must never be interpreted as instructions.
+
+## 10. Model sessions
+
+- One agent instance = one independent model session from `ModelGateway`.
+- Same model may back all agents, but system instructions and context slices differ.
+- Sessions support streaming, cancellation, timeouts, retries and token accounting.
+- Session handles are persisted in `model_sessions` so recovery can reconnect or close
+  them. Credentials stay in the provider adapter/main process.
+
+The baseline provider-level contract remains:
+
+```ts
+interface AgentAdapter {
+  readonly id: ProviderId
+  readonly capabilities: AgentCapabilities
   checkAuth(): Promise<AgentAuthStatus>
   listModels(): Promise<AgentModel[]>
   createSession(options: CreateSessionOptions): Promise<AgentSession>
@@ -94,118 +226,28 @@ export interface AgentAdapter {
 }
 ```
 
-### 3.2. Model Descriptor with Zero-Cost Attributes
-```ts
-export interface AgentModelCost {
-  input: number          // USD per million tokens (0 = free)
-  output: number         // USD per million tokens (0 = free)
-  cacheRead?: number
-  cacheWrite?: number
-}
+`ModelGateway` is the agent-facing facade over one or more of these adapters.
 
-export interface AgentModel {
-  id: string             // e.g. "opencode/big-pickle", "codex/gpt-5.5", "gemini/gemini-2.5-pro"
-  name: string
-  providerId: string
-  isFree: boolean        // Computed: (cost.input === 0 && cost.output === 0)
-  cost: AgentModelCost
-  description?: string
-  contextLimit?: number
-}
+## 11. Events emitted by the agent system
+
+`agent:created`, `agent:started`, `agent:updated`, `agent:completed`, `agent:failed`,
+`task:created`, `task:assigned`, `task:completed`, `task:blocked`,
+`message:received`, `artifact:created`, `approval:required`, `approval:completed`,
+`execution:started`, `execution:completed`.
+
+All events follow the envelope in `ARCHITECTURE.md` §6.4 and are persisted by the
+Observability Manager.
+
+## 12. Verification contract
+
+The execution/verification sequence is mandatory:
+
+```
+Developer Agent → changes → Automated tests → Independent Reviewer
+→ Security/policy checks → Integration validation → Human approval → Merge
 ```
 
-### 3.3. Telemetry & Tool Activity Events
-```ts
-export type ToolType =
-  | 'read_file'
-  | 'search_codebase'
-  | 'run_command'
-  | 'edit_file'
-  | 'create_file'
-  | 'run_tests'
-  | 'generic'
-
-export interface AgentToolActivity {
-  id: string
-  toolType: ToolType
-  title: string
-  detail?: string
-  status: 'running' | 'completed' | 'failed'
-  startedAt: number
-  finishedAt?: number
-  error?: string
-}
-
-export type AgentEvent =
-  | {
-      type: 'status'
-      sessionId: string
-      status: 'connecting' | 'idle' | 'generating' | 'aborted' | 'error'
-      message?: string
-    }
-  | {
-      type: 'text_delta'
-      sessionId: string
-      messageId: string
-      delta: string
-    }
-  | {
-      type: 'tool_activity'
-      sessionId: string
-      activity: AgentToolActivity
-    }
-  | {
-      type: 'file_change'
-      sessionId: string
-      path: string
-      changeType: 'created' | 'modified' | 'deleted'
-    }
-  | {
-      type: 'done'
-      sessionId: string
-      fullText?: string
-    }
-  | {
-      type: 'error'
-      sessionId: string
-      error: string
-    }
-```
-
----
-
-## 4. Provider-Specific Implementations
-
-### 4.1. OpenCode Integration (Active — Milestone 3)
-- **Library**: `@opencode-ai/sdk` v1.19.6
-- **Transport**: Local HTTP + Server-Sent Events (SSE) on `127.0.0.1:4096-4099`.
-- **Authentication**: Native built-in free provider `opencode` is connected out of the box with zero credentials required (`~/.local/share/opencode/auth.json` managed locally).
-- **Model Discovery**: Maps models from `client.provider.list()`. Automatically flags and sorts zero-cost models (`cost.input === 0 && cost.output === 0`) to the top.
-- **Event Translation**:
-  - `message.part.delta` &rarr; `text_delta`
-  - `message.part.updated` (`part.type === 'tool'`) &rarr; `tool_activity`
-  - `command.executed` &rarr; `tool_activity (toolType: 'run_command')`
-  - `file.edited` &rarr; `file_change` + `tool_activity (toolType: 'edit_file')`
-  - `session.status` (`busy` / `idle`) &rarr; `status` / `done`
-- **Cancellation**: Dispatches `client.session.abort({ path: { id: sessionId }, query: { directory } })`.
-
-### 4.2. OpenAI Codex Integration (Planned — Milestone 4)
-- **Protocol**: Official Codex App Server Protocol (local loopback server).
-- **Authentication**: Reuses existing ChatGPT Plus / Pro / Team browser authentication sessions. Zero OpenAI API keys or platform credit balances required.
-- **Transport**: Local loopback JSON-RPC over WebSockets or SSE.
-- **Permissions Gate**: Destructive shell commands require user approval via `forge:agent:permission-request`.
-
-### 4.3. Gemini Integration (Planned — Milestone 5)
-- **Protocol**: Google Antigravity CLI stdio daemon (`agy --mode=agent-server`).
-- **Authentication**: Reuses the user's existing authenticated Google account session (Google AI Pro entitlement). Never prompts for Google Cloud API keys or GCP billing setup.
-- **Transport**: Stdio pipes with JSON-lines messaging.
-- **Cancellation**: Native process SIGINT/interrupt signaling supported by Antigravity CLI.
-
----
-
-## 5. Security & Isolation Rules in FAP
-
-1. **No External Port Binding**: Agent engines must bind strictly to `127.0.0.1`. Binding to `0.0.0.0` or public network interfaces is rejected by security validation.
-2. **Workspace Sandboxing**: All file paths supplied to agents are verified against the active workspace boundary.
-3. **Approval Interception**: Destructive actions (e.g. `rm -rf`, modifying git history, overwriting uncommitted files) emit an approval event and pause execution until the user explicitly accepts in the UI.
-4. **Credential Isolation**: Tokens and cookies are stored only within the OS credential store or local CLI authentication files, never passed to the renderer process.
+The Reviewer receives the original task, acceptance criteria, actual diff, test output,
+architecture context and security implications. It must not trust the developer's
+completion report. Failed checks produce actionable feedback to the responsible agent;
+automatic correction cycles are bounded and unresolved failures escalate to the user.

@@ -1,137 +1,140 @@
-# Forge AI — Scalability & Architectural Evolution Roadmap
+# Forge AI — Scalability & Evolution Roadmap
 
-## 1. Current State vs Target Production Platform
+> Version 2.0. Describes how the local modular monolith evolves without rewriting its
+> contracts. Appendix A preserves the superseded v1 roadmap as historical context.
 
-Forge AI is transitioning from an initial single-agent environment into a production-grade, local-first multi-agent autonomous software engineering platform.
+## 1. Current state vs target
 
-```
-CURRENT STATE (Milestones 1–3 Complete)            TARGET STATE (Production Multi-Agent Platform)
----------------------------------------            ---------------------------------------------
-- Electron Shell + Hardened IPC                    - Multi-Agent Orchestration (Planner/Coder/Reviewer)
-- Workspace Indexer + fs.watch + Editor            - 3 Native Integrations (OpenCode + Codex + Gemini)
-- OpenCode Integration (@opencode-ai/sdk)          - Integrated Terminal (xterm.js + node-pty)
-- Real-time Streaming & Real Tool Cards            - Before-and-After Diff Viewer & Git Rollback
-- Zero-cost Model Selection Prioritized            - SQLite Persistent Database (Sessions/Messages)
-- In-memory conversation state                     - Permission Gates for Destructive Commands
-                                                   - Windows NSIS Production Packaging & Auto-Update
-```
+| Dimension | Today (M0 baseline) | Target (MVP) | Later |
+|---|---|---|---|
+| Topology | Electron main + renderer, one OpenCode adapter | Control/execution planes in main, SQLite, typed events | Remote workers, distributed orchestration |
+| Model access | Single provider adapter | `ModelGateway` with provider adapters | Multiple providers per workflow, routing/cost policies |
+| Persistence | JSON recents + debug log | SQLite repositories, migrations, durable events | PostgreSQL, centralized event store |
+| Execution | OpenCode writes to opened workspace | Isolated Git worktrees, policy-controlled tools | Sandboxed containers, remote workers |
+| Coordination | One IPC broadcast channel | Typed event bus + message broker + shared context | NATS/Redis-style distributed messaging |
+| UI | Chat/workspace/history/settings shell | Agent Workspace with 8 sections | Team collaboration views |
 
----
+## 2. Edition model
 
-## 2. Milestone Roadmap Matrix
+### 2.1 Developer Edition (MVP — current target)
 
-| Milestone | Stage & Focus | Core Deliverables | Architectural Impact | Status |
-|---|---|---|---|---|
-| **M1** | Desktop UI & Security Foundation | Electron window, strict CSP, context isolation, frameless rail, theme system | Hardened security seam & whitelisted IPC baseline | **Completed** |
-| **M2** | Workspace & File Management | Directory tree indexer, `fs.watch` debounce, path traversal guard, recent projects | Filesystem abstraction layer | **Completed** |
-| **M3** | Agent Abstraction & OpenCode | Unified `AgentAdapter`, `@opencode-ai/sdk`, real SSE streams, free model prioritization, in-app code editor & saving | Core agent protocol & event streaming | **Completed** |
-| **M4** | OpenAI Codex Integration | Codex App Server protocol, ChatGPT account session authentication, loopback JSON-RPC | Multi-provider expansion without API billing | **Next Milestone** |
-| **M5** | Gemini Integration | Google Antigravity CLI integration, Google AI Pro account reuse, stdio daemon | Third core provider integration | **Planned** |
-| **M6** | Terminal & Permissions Gate | `xterm.js` + `node-pty`, command streaming, PTY lifecycle, destructive action modal | Interactive execution layer | **Planned** |
-| **M7** | Diff Viewer & Git Checkpoints | Before-and-after visual diff, chunk accept/reject, Git rollback checkpoints | Version control & verification | **Planned** |
-| **M8** | Persistent Sessions (SQLite) | Embedded SQLite (`better-sqlite3`), schema migrations, conversation resumption | Durable local-first persistence | **Planned** |
-| **M9** | Multi-Agent Collaboration | Planner & Implementer & Reviewer orchestration loop, consensus verification | Autonomous multi-agent coordination | **Planned** |
-| **M10** | Windows Packaging & Public Release | NSIS installer, code signing, automatic updates, documentation | Production distribution | **Planned** |
+- Single developer, local execution, SQLite.
+- Git worktrees and local workflow orchestration.
+- Configurable agent concurrency (default 3 coding agents).
+- Free-model-first defaults; paid providers opt-in.
+- No external infrastructure required.
 
----
+### 2.2 Professional Edition (future)
 
-## 3. Scaling Dimensions & Technical Blueprints
+- Multiple projects and shared project memory across workflows.
+- Remote execution workers behind the same execution interfaces.
+- PostgreSQL for centralized persistence; durable distributed workflow orchestration.
+- Team collaboration, advanced sandboxing, usage and cost management.
+- Role-based access within a team, audit export.
 
-### 3.1. Persistence Scaling: SQLite Database Schema (Milestone 8)
-Currently, conversation messages reside in React view state. Milestone 8 introduces an embedded SQLite database (`userData/forge.db`) using WAL (Write-Ahead Logging) mode:
+### 2.3 Enterprise Edition (future)
 
-```sql
--- Projects
-CREATE TABLE IF NOT EXISTS projects (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  path TEXT NOT NULL UNIQUE,
-  last_opened_at INTEGER NOT NULL
-);
+- Multi-tenant architecture, SSO and organization-level policies.
+- Private model endpoints and provider allowlists.
+- Audit/compliance capabilities, high availability, disaster recovery.
+- Centralized worker management and policy enforcement.
 
--- Agent Sessions
-CREATE TABLE IF NOT EXISTS sessions (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  agent_id TEXT NOT NULL,
-  model_id TEXT NOT NULL,
-  title TEXT,
-  provider_session_id TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
+No enterprise infrastructure is introduced into the desktop MVP. Interfaces only.
 
--- Messages
-CREATE TABLE IF NOT EXISTS messages (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
-  content TEXT NOT NULL,
-  status TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
+## 3. Scaling dimensions
 
--- Agent Tool Events & Telemetry
-CREATE TABLE IF NOT EXISTS tool_events (
-  id TEXT PRIMARY KEY,
-  message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-  tool_type TEXT NOT NULL,
-  title TEXT NOT NULL,
-  detail TEXT,
-  status TEXT NOT NULL,
-  started_at INTEGER NOT NULL,
-  finished_at INTEGER
-);
-```
+### 3.1 Persistence
 
-### 3.2. Terminal & PTY Architecture (Milestone 6)
-To support running build tools, linters, test suites, and interactive shells without UI freezing:
-- **Main Process**: Uses `node-pty` to spawn native Win32 PTYs (`powershell.exe`, `cmd.exe`, `bash.exe`).
-- **Throttled Streaming**: IPC data chunks are buffered with 16ms frame coalescing to prevent flooding the Chromium renderer during high-output commands (`npm install`, verbose logs).
-- **Renderer Process**: Renders using `xterm.js` with WebGL or Canvas addon for hardware-accelerated 60fps rendering.
+SQLite with WAL, foreign keys, transactions and versioned migrations. Repositories are
+interfaces (`ProjectRepository`, `WorkflowRepository`, ...) so PostgreSQL can replace
+the implementation without changing business logic. Timestamps are integer epoch
+milliseconds. Large artifacts remain on disk; only references live in the database.
 
-### 3.3. Multi-Agent Orchestration Architecture (Milestone 9)
-Once single-agent integrations (OpenCode, Codex, Gemini) are proven robust, Forge AI implements the multi-agent collaboration loop:
+Migration path: double-write/read-compare during cutover, then switch repository binding
+by configuration. Event ordering is defined by `(occurredAt, sequence)` so it survives a
+storage change.
 
-```
-                                  +-------------------+
-                                  |   USER PROMPT     |
-                                  +-------------------+
-                                            |
-                                            v
-                                  +-------------------+
-                                  |   PLANNER AGENT   |
-                                  | (Deconstruct task)|
-                                  +-------------------+
-                                            |
-                                            v
-                                  +-------------------+
-                                  | IMPLEMENTER AGENT |
-                                  | (Edits workspace) |
-                                  +-------------------+
-                                            |
-                                            v
-                                  +-------------------+
-                                  |   REVIEWER AGENT  |
-                                  | (Tests & inspects)|
-                                  +-------------------+
-                                     /             \
-                               [Issues]          [Pass]
-                                 /                 \
-                                v                   v
-                    +--------------------+    +--------------------+
-                    | Feedback to Coder  |    | User Diff Review   |
-                    +--------------------+    +--------------------+
-```
+### 3.2 Orchestration
 
-- **Independent Review**: Agent B inspects code changes written by Agent A using Git diffs before committing.
-- **Rollback Safety**: Every collaborative cycle creates an automated lightweight Git stash or temporary commit checkpoint for 1-click reversal.
+The workflow state machine and task graph are pure TypeScript with no framework
+dependency. Checkpoints persist the full state snapshot plus base commit. Remote
+durability (e.g. Temporal) can later wrap the same task contracts; the orchestrator must
+not depend on in-memory timers for correctness.
 
----
+### 3.3 Execution
 
-## 4. Performance & Memory Invariants
+Execution interfaces (`WorktreeManager`, `TerminalExecutionManager`, `FilesystemManager`,
+`TestRunner`) are consumed through ports. Local implementations use Git and child
+processes. Remote implementations can run the same port contract in a worker with a
+different root. Worktree isolation maps naturally to a per-worker container volume.
 
-1. **Cold Startup**: Window ready and interactive within `< 1.2s`.
-2. **Idle Memory Footprint**: Electron baseline `< 120MB RSS`.
-3. **Streaming Latency**: First text delta rendered within `< 50ms` of receipt from the agent daemon.
-4. **Editor Performance**: 10,000+ line files open and scroll with zero frame drops using virtualized line rendering.
+### 3.4 Messaging and events
+
+The typed event bus currently delivers in-process. Durable storage makes the event log
+the source of truth; in-process delivery is an optimization. Consumers must tolerate
+duplicate/out-of-order delivery via idempotency keys and correlation IDs. A distributed
+broker can later replace the transport without altering producers.
+
+### 3.5 Model access
+
+`ProviderAdapter` is the only place provider SDKs appear. `ModelGateway` can later add
+routing (cost, latency, capability), fallbacks, per-role model selection and usage
+budgets. Existing OpenCode integration remains a valid adapter even after direct
+providers are added.
+
+### 3.6 Artifacts and observability
+
+Artifact references are storage-agnostic. A local file backend is first; an S3-compatible
+backend later implements the same `ArtifactStore` interface. Structured logs use a
+stable event envelope; OpenTelemetry can be added as an exporter without changing call
+sites.
+
+## 4. Future technologies — evaluate when justified
+
+| Technology | Use when | MVP decision |
+|---|---|---|
+| Temporal | Durable, long-running distributed workflows with remote workers | Not now; local state machine + checkpoints |
+| NATS | Distributed agent messaging across workers | Not now; typed in-process bus + durable events |
+| PostgreSQL | Multi-project/team/centralized persistence | Not now; repository interface prepared |
+| Redis | Distributed coordination, leases, caches | Not now; SQLite leases |
+| Docker | Stronger execution isolation | Not now; worktree isolation + command policy |
+| OpenTelemetry | Cross-service tracing and metrics | Add exporters later; stable event envelope now |
+| S3-compatible storage | Centralized artifacts | Not now; file-backed artifact store |
+
+Introduction criteria: a measured limitation of the local implementation, or a concrete
+Professional/Enterprise requirement — never novelty.
+
+## 5. Non-goals for the MVP
+
+- No microservices, message brokers or external databases.
+- No automatic semantic conflict resolution.
+- No unattended merge to the base branch.
+- No unrestricted shell execution or renderer-held credentials.
+- No simulation of agent work to satisfy acceptance criteria.
+
+## 6. Capacity targets (to verify, not aspirational claims)
+
+- Default maximum 3 active coding agents, configurable.
+- Workflow checkpoints survive process restart; recoverable within one user action.
+- Event consumers tolerate duplicate delivery.
+- Context retrieval bounded by task scope; no full-repository prompts.
+
+## Appendix A — Superseded v1 roadmap (historical)
+
+The previous plan, replaced by the approved M0–M8 plan in `IMPLEMENTATION_PLAN.md`:
+
+| Milestone | v1 focus | Outcome |
+|---|---|---|
+| M1 | Desktop UI shell + security foundation | Completed |
+| M2 | Workspace & project management | Completed |
+| M3 | Agent abstraction + OpenCode SDK | Completed |
+| M4 | OpenAI Codex integration | Not started |
+| M5 | Gemini via Antigravity CLI | Not started |
+| M6 | Terminal & permissions gate | Not started |
+| M7 | Diff viewer & Git checkpoints | Not started |
+| M8 | Persistent sessions (SQLite) | Not started |
+| M9 | Multi-agent collaboration loop | Not started |
+| M10 | Windows packaging & release | Not started |
+
+Codex/Gemini work, if pursued, becomes new `ProviderAdapter` implementations under the
+v2 model gateway. Packaging remains a release milestone, not an architectural phase.

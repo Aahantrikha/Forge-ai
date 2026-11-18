@@ -1,38 +1,32 @@
 # Forge AI
 
-Local-first, open-source desktop AI coding environment for Windows. Forge AI provides a
-chat-first interface to multiple autonomous coding agents (OpenCode, OpenAI Codex, Gemini)
-using your existing subscriptions — no extra API credits or AI editor subscriptions required.
+Local-first desktop AI software engineering platform. Forge AI turns a natural-language
+objective into a supervised workflow where specialized agents plan, implement, test and
+review code in isolated Git worktrees, with the developer approving material actions.
+Zero-cost models are the default; paid providers are opt-in.
 
 Stack: Electron + React + TypeScript (Vite).
 
-## Status — Milestone 2: Workspace & Project Management (Current)
+## Status — M1 foundation complete, M2 model gateway next
 
-Implemented milestones:
+The current release is the working single-agent baseline plus the new foundation:
 
-- **Milestone 1 (Desktop UI Shell & Security Foundation)**:
-  - Electron security hardening: `contextIsolation: true`, `nodeIntegration: false`,
-    `worker` Node disabled, `sandbox: true`, navigation/popup guards, dev-only menu.
-  - Typed, whitelisted IPC: the renderer has **no** raw `ipcRenderer` access. The full
-    channel whitelist lives in `src/shared/ipc.ts` (`IpcChannels`), bridged as
-    `window.forgeAI` by `electron/preload.ts`.
-  - Build-time CSP injection (strict policy in production; dev allowances never ship).
-  - Desktop shell: frameless custom title bar, activity rail, contextual sidebar,
-    status bar, and the chat / workspace / history / settings views with navigation.
-  - Agent selector UI backed by `src/app/agents.ts`.
+- **Desktop shell & security foundation**: context isolation, sandboxing, no renderer
+  Node access, build-time CSP, native menu, navigation/popup guards, and a typed IPC
+  whitelist (`src/shared/ipc.ts`, `electron/preload.ts`) with no raw `ipcRenderer`.
+- **Workspace & project management**: directory picker, bounded file tree, live
+  filesystem watching, recent workspaces, in-app file editing and saving.
+- **OpenCode integration**: provider-level `AgentAdapter`, local engine lifecycle, real
+  SSE streaming, tool activity events, free-model prioritization and cancellation.
+- **Persistence & coordination foundation**: Zod domain schemas, SQLite with versioned
+  migrations and 12 repositories, a durable typed event bus, structured logging and
+  validated IPC arguments (`src/shared/domain`, `electron/persistence`,
+  `electron/coordination`, `electron/ipc/validation.ts`).
 
-- **Milestone 2 (Workspace & Project Management)**:
-  - Native directory picker with directory traversal protections and sandboxing.
-  - Real-time collapsible file tree with extension-based color coding.
-  - Live filesystem watching (`fs.watch`) with automatic UI tree refresh on file edits.
-  - Recent workspaces management with instant project switching.
-  - Interactive file metadata viewer.
-
-Next milestones:
-
-- Agent integrations (Milestones 3–5): OpenCode SDK, Codex App Server, Antigravity CLI.
-- Streaming, permissions, terminal (Milestone 6); diff viewer & git (7); SQLite
-  persistence (8); multi-agent orchestration (9); packaging & release (10).
+The platform transformation is planned in milestones M0–M8 in `IMPLEMENTATION_PLAN.md`:
+M0 audit (complete) → M1 persistence/foundation (complete) → M2 model gateway → M3 agent runtime →
+M4 worktree execution → M5 orchestration → M6 coordination → M7 verification/approvals →
+M8 Agent Workspace. See `ARCHITECTURE.md` for the target design.
 
 ## Architecture
 
@@ -48,8 +42,23 @@ electron/
   preload.ts         # contextBridge: exposes ONLY the typed ForgeApi surface
 ```
 
+## Documentation
+
+- `ARCHITECTURE.md` — target system design and migration from the baseline
+- `AGENT_PROTOCOL.md` — dynamic agents, lifecycle, messaging and verification
+- `SECURITY_MODEL.md` — trust boundaries, permissions and approvals
+- `SCALABILITY_ROADMAP.md` — Developer/Professional/Enterprise evolution
+- `IMPLEMENTATION_PLAN.md` — M0–M8 milestones, files, dependencies and acceptance
+- `DATABASE_SCHEMA.md` — entities, relations and repository interfaces
+- `IPC_CONTRACTS.md` — typed renderer↔main channel registry
+- `TESTING_STRATEGY.md` — test pyramid and per-milestone gates
+- `CHANGELOG.md` — milestone results and decisions
+
 ## Scripts
 
 - `npm run dev` — development (Vite HMR + Electron).
 - `npm run build` — typecheck, production build, installer (electron-builder).
 - `npm run lint` — ESLint.
+- `npm test` — Vitest unit/integration tests.
+- `npm run test:watch` — Vitest watch mode.
+- `npm run rebuild` — rebuild native modules for Electron (requires Visual Studio C++ Build Tools).

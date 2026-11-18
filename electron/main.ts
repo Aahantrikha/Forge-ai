@@ -3,9 +3,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { IpcChannels, type AppInfo } from '../src/shared/ipc'
-import type { AgentId, CreateSessionOptions, SubmitPromptOptions } from '../src/shared/agent'
 import { WorkspaceService } from './workspace'
 import { AgentService } from './agent-service'
+import { createForgeContext, disposeForgeContext } from './context'
+import { IpcArgs, validateArgs } from './ipc/validation'
 
 const logPath = path.join(app.getPath('userData'), 'electron-debug.log')
 try {
@@ -56,6 +57,7 @@ const SECURITY_STATUS: AppInfo['security'] = {
 }
 
 let win: BrowserWindow | null = null
+const forge = createForgeContext(app.getPath('userData'))
 const workspaceService = new WorkspaceService(() => win)
 const agentService = new AgentService(() => win)
 
@@ -69,30 +71,49 @@ function registerIpcHandlers() {
     security: SECURITY_STATUS,
   }))
 
-  // Workspace controls (Milestone 2 - End-to-End Folder & File operations)
+  // Workspace controls — every argument is validated at the trust boundary.
   ipcMain.handle(IpcChannels.workspaceOpenFolder, () => workspaceService.openFolder())
   ipcMain.handle(IpcChannels.workspaceOpenFile, () => workspaceService.openFile())
-  ipcMain.handle(IpcChannels.workspaceReadFile, (_event, filePath: string) => workspaceService.readFile(filePath))
-  ipcMain.handle(IpcChannels.workspaceSaveFile, (_event, filePath: string, content: string) =>
-    workspaceService.saveFile(filePath, content)
-  )
+  ipcMain.handle(IpcChannels.workspaceReadFile, (_event, ...args: unknown[]) => {
+    const [filePath] = validateArgs(IpcArgs.readFile, args, IpcChannels.workspaceReadFile)
+    return workspaceService.readFile(filePath)
+  })
+  ipcMain.handle(IpcChannels.workspaceSaveFile, (_event, ...args: unknown[]) => {
+    const [filePath, content] = validateArgs(IpcArgs.saveFile, args, IpcChannels.workspaceSaveFile)
+    return workspaceService.saveFile(filePath, content)
+  })
   ipcMain.handle(IpcChannels.workspaceSelectDirectory, () => workspaceService.selectDirectory())
   ipcMain.handle(IpcChannels.workspaceGetCurrent, () => workspaceService.getWorkspaceInfo())
-  ipcMain.handle(IpcChannels.workspaceSetCurrent, (_event, dirPath: string) => workspaceService.setCurrent(dirPath))
-  ipcMain.handle(IpcChannels.workspaceGetTree, (_event, customRoot?: string) => workspaceService.getTree(customRoot))
+  ipcMain.handle(IpcChannels.workspaceSetCurrent, (_event, ...args: unknown[]) => {
+    const [dirPath] = validateArgs(IpcArgs.setCurrent, args, IpcChannels.workspaceSetCurrent)
+    return workspaceService.setCurrent(dirPath)
+  })
+  ipcMain.handle(IpcChannels.workspaceGetTree, (_event, ...args: unknown[]) => {
+    const [customRoot] = validateArgs(IpcArgs.getTree, args, IpcChannels.workspaceGetTree)
+    return workspaceService.getTree(customRoot)
+  })
 
-  // Agent controls (Milestone 3 - Unified Agent Abstraction & OpenCode)
-  ipcMain.handle(IpcChannels.agentCheckAuth, (_event, agentId: AgentId) => agentService.checkAuth(agentId))
-  ipcMain.handle(IpcChannels.agentListModels, (_event, agentId: AgentId) => agentService.listModels(agentId))
-  ipcMain.handle(IpcChannels.agentCreateSession, (_event, agentId: AgentId, options: CreateSessionOptions) =>
-    agentService.createSession(agentId, options)
-  )
-  ipcMain.handle(IpcChannels.agentSubmitPrompt, (_event, agentId: AgentId, options: SubmitPromptOptions) =>
-    agentService.submitPrompt(agentId, options)
-  )
-  ipcMain.handle(IpcChannels.agentCancel, (_event, agentId: AgentId, sessionId: string, workspacePath?: string) =>
-    agentService.cancel(agentId, sessionId, workspacePath)
-  )
+  // Agent controls — provider-level facade; dynamic agents arrive in M3.
+  ipcMain.handle(IpcChannels.agentCheckAuth, (_event, ...args: unknown[]) => {
+    const [agentId] = validateArgs(IpcArgs.checkAuth, args, IpcChannels.agentCheckAuth)
+    return agentService.checkAuth(agentId)
+  })
+  ipcMain.handle(IpcChannels.agentListModels, (_event, ...args: unknown[]) => {
+    const [agentId] = validateArgs(IpcArgs.listModels, args, IpcChannels.agentListModels)
+    return agentService.listModels(agentId)
+  })
+  ipcMain.handle(IpcChannels.agentCreateSession, (_event, ...args: unknown[]) => {
+    const [agentId, options] = validateArgs(IpcArgs.createSession, args, IpcChannels.agentCreateSession)
+    return agentService.createSession(agentId, options)
+  })
+  ipcMain.handle(IpcChannels.agentSubmitPrompt, (_event, ...args: unknown[]) => {
+    const [agentId, options] = validateArgs(IpcArgs.submitPrompt, args, IpcChannels.agentSubmitPrompt)
+    return agentService.submitPrompt(agentId, options)
+  })
+  ipcMain.handle(IpcChannels.agentCancel, (_event, ...args: unknown[]) => {
+    const [agentId, sessionId, workspacePath] = validateArgs(IpcArgs.cancel, args, IpcChannels.agentCancel)
+    return agentService.cancel(agentId, sessionId, workspacePath)
+  })
 }
 
 function setupApplicationMenu() {
@@ -251,6 +272,7 @@ function createWindow() {
 app.on('window-all-closed', () => {
   workspaceService.dispose()
   void agentService.dispose()
+  disposeForgeContext(forge)
   if (process.platform !== 'darwin') {
     app.quit()
     win = null
