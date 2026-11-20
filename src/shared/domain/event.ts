@@ -21,6 +21,9 @@ export const EventTypeSchema = z.enum([
   'approval:completed',
   'execution:started',
   'execution:completed',
+  'model:session-created',
+  'model:usage',
+  'model:error',
 ])
 
 export type EventType = z.infer<typeof EventTypeSchema>

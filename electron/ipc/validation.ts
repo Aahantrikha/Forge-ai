@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AgentIdSchema, SpawnAgentRequestSchema } from '../../src/shared/domain'
 
 export const FilePathSchema = z.string().min(1)
 export const FileContentSchema = z.string()
@@ -11,6 +12,7 @@ export const FileStateSchema = z.object({
   hash: z.string().min(1),
 })
 export const SessionIdSchema = z.string().min(1)
+export const WorkflowIdArgSchema = z.string().min(1)
 export const PromptSchema = z.string().min(1)
 
 export const ProviderIdArgSchema = z.enum(['opencode', 'codex', 'gemini'])
@@ -43,6 +45,13 @@ export const IpcArgs = {
   createSession: z.tuple([ProviderIdArgSchema, CreateSessionOptionsSchema]),
   submitPrompt: z.tuple([ProviderIdArgSchema, SubmitPromptOptionsSchema]),
   cancel: z.tuple([ProviderIdArgSchema, SessionIdSchema, DirectoryPathSchema.optional()]),
+  agentSpawn: z.tuple([SpawnAgentRequestSchema]),
+  agentList: z.tuple([WorkflowIdArgSchema]),
+  agentInspect: z.tuple([AgentIdSchema]),
+  agentExecute: z.tuple([AgentIdSchema, PromptSchema]),
+  agentTerminate: z.tuple([AgentIdSchema]),
+  modelList: z.tuple([ProviderIdArgSchema.optional()]),
+  modelUsage: z.tuple([WorkflowIdArgSchema.optional()]),
 } as const
 
 export class IpcValidationError extends Error {

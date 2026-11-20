@@ -4,6 +4,42 @@ All notable changes to Forge AI are recorded here. Format follows Keep a Changel
 
 ## [Unreleased]
 
+### M3 — Agent runtime — Completed
+
+- Added validated role profiles and dynamic role manifests in `src/shared/domain/agent.ts`
+  and `electron/agents/agent-prompts/roles.ts`; built-in roles cover architect, research,
+  frontend, backend, database, QA and code review.
+- Added `AgentFactory`, `AgentRegistry` and `AgentRuntime`. Spawning creates a real
+  independent model session through `ModelGateway`, persists agent/session linkage, and
+  emits durable `agent:*` events. Runtime enforces lifecycle transitions, heartbeats,
+  global/per-workflow concurrency, recursion depth and token budgets.
+- Added `PathGuard` and routed workspace reads, saves and entry mutations through it.
+  Added `ToolRegistry` with read-only/controlled/sensitive levels, workspace containment,
+  writable-ownership glob matching and `APPROVAL_REQUIRED` for sensitive tools.
+- Added typed `forge:agent:spawn/list/inspect/execute/terminate` and `forge:event` IPC
+  channels with Zod validation, preload bridge methods and main-process handlers.
+- Added M3 tests for path traversal/symlink escapes, tool permissions, role validation,
+  lifecycle transitions, concurrency, recursion, token budgets, stale-agent sweeps, real
+  provider usage accounting and workspace-editor regressions.
+- Acceptance result: `$env:FORGE_OPENCODE_INTEGRATION='1'; npx tsc --noEmit; if ($?) { npm run lint }; if ($?) { npx vite build }; if ($?) { npm test }` passes; 63/63 tests with real OpenCode (62 passed / 1 skipped by default).
+
+### M2 — Model gateway — Completed
+
+- Added `ProviderAdapter`, `ProviderRegistry` and `ModelGateway` under `electron/models`.
+  The gateway owns persisted `model_sessions` records, independent provider sessions,
+  event enrichment, timeout/cancel handling, bounded retry, normalized provider errors
+  and token/cost usage accounting.
+- Wrapped `OpencodeAdapter` in the gateway, added real OpenCode usage parsing from
+  assistant messages, and kept `AgentService` as a thin compatibility facade so the
+  existing chat UI continues to work.
+- Added `forge:model:list` and `forge:model:usage` typed IPC channels with Zod validation,
+  plus `model:session-created`, `model:usage` and `model:error` durable event types.
+- Added gateway tests for provider swap, independent sessions, event attribution, usage
+  persistence/durability, retry, timeout/cancel and aggregated usage. Added a real
+  OpenCode create → stream → cancel integration test gated by `FORGE_OPENCODE_INTEGRATION=1`.
+- Acceptance result: `npx tsc --noEmit`, `npm run lint`, `npx vite build` and the full test
+  suite pass; 43 unit/integration tests plus the gated real OpenCode test (44/44) pass.
+
 ### M1 — Foundation & persistence — Completed
 
 - Added `better-sqlite3`, `zod`, `vitest`, `@types/better-sqlite3`, `@electron/rebuild`,

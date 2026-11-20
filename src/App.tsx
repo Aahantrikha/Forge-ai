@@ -5,6 +5,7 @@ import { StatusBar } from './components/StatusBar'
 import { TitleBar } from './components/TitleBar'
 import type { AgentId } from './app/agents'
 import type { ViewId } from './app/navigation'
+import type { AgentSession } from './shared/agent'
 import type {
   FileChangeEvent,
   FileState,
@@ -30,6 +31,9 @@ export default function App() {
   const [view, setView] = useState<ViewId>('chat')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [selectedAgent, setSelectedAgent] = useState<AgentId | null>(null)
+  const [activeSession, setActiveSession] = useState<AgentSession | null>(null)
+  const [selectedModel, setSelectedModel] = useState('opencode/big-pickle')
+  const [creatingSession, setCreatingSession] = useState(false)
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null)
   const [tree, setTree] = useState<FileTreeNode | null>(null)
   const [activeFile, setActiveFile] = useState<OpenedFile | null>(null)
@@ -41,6 +45,7 @@ export default function App() {
   const [notice, setNotice] = useState<Notice | null>(null)
   const [sessionKey, setSessionKey] = useState(0)
   const saveInFlightRef = useRef(false)
+  const newChatInFlightRef = useRef(false)
 
   const dirty = !!activeFile && draftPath === activeFile.path && draftContent !== activeFile.content
   const dirtyRef = useRef(dirty)
@@ -387,9 +392,38 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [activeFile, draftContent, handleSaveFile])
 
-  const startNewSession = () => {
-    setSessionKey((key) => key + 1)
-    setView('chat')
+  const startNewSession = async () => {
+    if (newChatInFlightRef.current) return
+    newChatInFlightRef.current = true
+    setCreatingSession(true)
+    try {
+      if (!forgeApi?.agent) {
+        setActiveSession(null)
+        setNotice({ tone: 'error', text: 'Agent service is unavailable in browser preview mode.' })
+      } else if (!workspace) {
+        setActiveSession(null)
+        setNotice({ tone: 'info', text: 'Open a project folder first; the new chat will be created then.' })
+      } else {
+        const session = await forgeApi.agent.createSession('opencode', {
+          workspacePath: workspace.path,
+          modelId: selectedModel,
+          title: 'New chat',
+        })
+        setActiveSession({ ...session, title: 'New chat' })
+        setNotice({ tone: 'success', text: 'New chat started.' })
+      }
+    } catch (error) {
+      setActiveSession(null)
+      setNotice({
+        tone: 'error',
+        text: error instanceof Error ? error.message : 'Could not create a new chat session.',
+      })
+    } finally {
+      newChatInFlightRef.current = false
+      setCreatingSession(false)
+      setSessionKey((key) => key + 1)
+      setView('chat')
+    }
   }
 
   return (
@@ -405,7 +439,8 @@ export default function App() {
           activeView={view}
           workspace={workspace}
           onSelect={setView}
-          onNewChat={startNewSession}
+          onNewChat={() => void startNewSession()}
+          newChatDisabled={creatingSession}
           onOpenFolder={handleOpenFolder}
         />
         {sidebarOpen ? (
@@ -415,7 +450,9 @@ export default function App() {
             tree={tree}
             activeFile={activeFile}
             loading={loadingTree}
-            onNewChat={startNewSession}
+            activeSession={activeSession}
+            newChatDisabled={creatingSession}
+            onNewChat={() => void startNewSession()}
             onOpenFolder={handleOpenFolder}
             onOpenFile={handleOpenFile}
             onSelectFile={handleSelectFile}
@@ -437,6 +474,10 @@ export default function App() {
               key={sessionKey}
               selectedAgent={selectedAgent}
               onSelectAgent={setSelectedAgent}
+              activeSession={activeSession}
+              onActiveSessionChange={setActiveSession}
+              selectedModel={selectedModel}
+              onSelectModel={setSelectedModel}
               workspace={workspace}
               onOpenFolder={handleOpenFolder}
             />

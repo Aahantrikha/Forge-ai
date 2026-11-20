@@ -41,6 +41,10 @@ export interface ChatMessage {
 interface ChatViewProps {
   selectedAgent: AgentId | null
   onSelectAgent: (id: AgentId | null) => void
+  activeSession: AgentSession | null
+  onActiveSessionChange: (session: AgentSession | null) => void
+  selectedModel: string
+  onSelectModel: (modelId: string) => void
   workspace: WorkspaceInfo | null
   onOpenFolder: () => void
 }
@@ -57,15 +61,17 @@ interface ChatViewProps {
 export function ChatView({
   selectedAgent,
   onSelectAgent,
+  activeSession,
+  onActiveSessionChange,
+  selectedModel,
+  onSelectModel,
   workspace,
   onOpenFolder,
 }: ChatViewProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [models, setModels] = useState<AgentModel[]>([])
-  const [selectedModel, setSelectedModel] = useState<string>('opencode/big-pickle')
   const [authStatus, setAuthStatus] = useState<AgentAuthStatus | null>(null)
-  const [activeSession, setActiveSession] = useState<AgentSession | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [draft, setDraft] = useState('')
@@ -121,9 +127,11 @@ export function ChatView({
         if (!active) return
         setModels(modelList)
         // Pick the first free model as default if available
-        const defaultFree = modelList.find((m) => m.isFree)
-        if (defaultFree) {
-          setSelectedModel(defaultFree.id)
+        if (!modelList.some((model) => model.id === selectedModel)) {
+          const defaultFree = modelList.find((m) => m.isFree)
+          if (defaultFree) {
+            onSelectModel(defaultFree.id)
+          }
         }
       })
       .catch(() => {
@@ -133,7 +141,7 @@ export function ChatView({
     return () => {
       active = false
     }
-  }, [selectedAgent])
+  }, [selectedAgent, selectedModel, onSelectModel])
 
   // Subscribe to real agent events from the main process
   useEffect(() => {
@@ -300,7 +308,7 @@ export function ChatView({
           modelId: selectedModel,
           title: text.slice(0, 40),
         })
-        setActiveSession(session)
+        onActiveSessionChange(session)
       }
 
       await forgeApi.agent.submitPrompt('opencode', {
@@ -431,7 +439,7 @@ export function ChatView({
                         type="button"
                         className={`model-dropdown-item${m.id === selectedModel ? ' selected' : ''}`}
                         onClick={() => {
-                          setSelectedModel(m.id)
+                          onSelectModel(m.id)
                           setModelPickerOpen(false)
                         }}
                       >
@@ -451,7 +459,7 @@ export function ChatView({
                             type="button"
                             className={`model-dropdown-item${m.id === selectedModel ? ' selected' : ''}`}
                             onClick={() => {
-                              setSelectedModel(m.id)
+                              onSelectModel(m.id)
                               setModelPickerOpen(false)
                             }}
                           >
@@ -641,15 +649,16 @@ export function ChatView({
 interface ChatSidebarProps {
   onNewChat: () => void
   activeSession?: AgentSession | null
+  newChatDisabled?: boolean
 }
 
 /** Sidebar for the chat view: session details + new-chat action. */
-export function ChatSidebar({ onNewChat, activeSession }: ChatSidebarProps) {
+export function ChatSidebar({ onNewChat, activeSession, newChatDisabled = false }: ChatSidebarProps) {
   return (
     <>
       <div className="sidebar-header">
         <span className="sidebar-title">Sessions</span>
-        <button type="button" className="btn btn-sm btn-primary" onClick={onNewChat} title="Start new session">
+        <button type="button" className="btn btn-sm btn-primary" onClick={onNewChat} disabled={newChatDisabled} title="Start new session">
           <PlusIcon size={13} />
           New chat
         </button>

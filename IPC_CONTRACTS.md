@@ -41,9 +41,19 @@ main→renderer events.
 | `forge:agent:submit-prompt` | invoke | `providerId, SubmitPromptOptions` | `void` |
 | `forge:agent:cancel` | invoke | `providerId, sessionId, workspacePath?` | `void` |
 | `forge:agent:event` | event | `AgentEvent` | — |
+| `forge:agent:spawn` | invoke | `SpawnAgentRequest` | `Agent` |
+| `forge:agent:list` | invoke | `workflowId` | `Agent[]` |
+| `forge:agent:inspect` | invoke | `agentId` | `Agent \| null` |
+| `forge:agent:execute` | invoke | `agentId, prompt` | `Agent` |
+| `forge:agent:terminate` | invoke | `agentId` | `Agent` |
+| `forge:event` | event | `ForgeEvent` | — |
+| `forge:model:list` | invoke | `providerId?` | `ModelCatalogEntry[]` |
+| `forge:model:usage` | invoke | `workflowId?` | `ModelUsageSummary` |
 
-Baseline remediation: `workspace:read-file` and `workspace:save-file` must be routed
-through `PathGuard` in M3; `agent:event` gains `agentId`/`workflowId`/`taskId` in M2–M5.
+Baseline remediation complete: `workspace:read-file` and `workspace:save-file` are routed
+through `PathGuard`. `agent:event` carries `providerId`, `agentId`, `workflowId`, `taskId`
+and `correlationId` when that context is known; durable domain events are delivered on
+`forge:event`.
 
 ## 3. Planned channels by milestone
 
@@ -54,22 +64,24 @@ through `PathGuard` in M3; `agent:event` gains `agentId`/`workflowId`/`taskId` i
 | `forge:event:subscribe` / `forge:event:unsubscribe` | Subscribe to typed workflow events with optional filters |
 | `forge:settings:get` / `forge:settings:set` | Typed, validated local settings (never secrets) |
 
-### M2 — model gateway
+### M2 — model gateway (implemented)
 
 | Channel | Purpose |
 |---|---|
 | `forge:model:list` | List providers/models through `ModelGateway` |
 | `forge:model:usage` | Token usage for a workflow |
 
-### M3 — agents
+### M3 — agents (implemented)
 
 | Channel | Purpose |
 |---|---|
-| `forge:agent:spawn` | Create a dynamic agent from a validated manifest request |
+| `forge:agent:spawn` | Create a dynamic agent from a validated role/spawn request |
 | `forge:agent:list` | List agents in a workflow |
-| `forge:agent:inspect` | Full agent state, logs, token usage, modified files |
+| `forge:agent:inspect` | Full persisted agent state |
+| `forge:agent:execute` | Submit a prompt through the agent's independent model session |
 | `forge:agent:terminate` | Explicitly terminate an agent |
-| `forge:agent:event` (extended) | Enriched event envelope with correlation IDs |
+| `forge:event` | Durable, enriched Forge domain events from the main process |
+| `forge:agent:event` | Provider-level streaming/tool/usage events |
 
 ### M4 — execution
 

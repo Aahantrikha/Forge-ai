@@ -29,21 +29,22 @@ Controls that exist in code today:
 | Bounded tree indexing and binary/large-file guards | `electron/workspace.ts:31-32, 142-182` |
 | No credentials in source or renderer IPC | verified by audit |
 
-Controls claimed in v1 but **not implemented** (must be fixed):
+Baseline gaps and current status:
 
-1. **Workspace containment is not universal.** `SECURITY_MODEL.md` v1 stated every
-   filesystem operation is contained. In reality `getTree()` checks containment
-   (`electron/workspace.ts:282-288`) but `readFile()` (`:129`) and `saveFile()` (`:201`)
-   call `path.resolve()` only. A renderer or compromised bridge path could read/write
-   outside the workspace, including through symlinks (no `realpath` check).
-2. **No command policy or destructive-action gate exists.** Tool activity cards display
-   events but do not intercept commands.
-3. **No approval system**, audit trail or permission tiers exist in code.
+1. **Workspace containment is enforced by `PathGuard`.** `electron/workspace.ts` routes
+   reads, saves and entry mutations through `electron/security/path-guard.ts`, which uses
+   canonical ancestor realpaths before checking containment.
+2. **A scoped `ToolRegistry` now gates agent tools.** Read-only, controlled and sensitive
+   levels are enforced against role permissions, workspace roots and writable ownership;
+   sensitive tools return `APPROVAL_REQUIRED`.
+3. **No command policy, approval manager or audit trail exists yet.** Command interception
+   and exact-action approval hashing are deferred to M4/M7.
 4. **No secret storage** is implemented; the v1 text referred to a future OS keychain.
-5. **No test suite** exists to prove any of the above.
+5. **Security tests now exist** for path traversal, symlink escapes, tool ownership and
+   sensitive-tool denial. Command and approval tests arrive in M4–M7.
 
-M3 of the implementation plan introduces `PathGuard` and closes items 1–4 incrementally;
-no agent write tools are enabled until the guard is in place.
+M3 closes path/tool containment and adds lifecycle/heartbeat, concurrency, recursion and
+token-budget limits; destructive commands remain unavailable until M4/M7.
 
 ## 3. Trust boundaries
 
@@ -155,7 +156,7 @@ are idempotent; audit records are append-only.
 | Threat | Control |
 |---|---|
 | Prompt injection to destructive command | Command policy + approval gate; model text has no authority |
-| Path traversal / symlink escape | `PathGuard` on every read/write (M3) |
+| Path traversal / symlink escape | `PathGuard` on workspace reads/writes and agent file tools (M3) |
 | Agent edits overlap / bad merge | File ownership, worktrees, conflict detection, human merge approval |
 | Credential leakage to renderer | Main-only secret storage; IPC contract; log filtering |
 | Malicious repo content | CSP, safe markdown, untrusted-data rule, no auto-execution |
@@ -166,8 +167,8 @@ are idempotent; audit records are append-only.
 ## 12. Remediation order
 
 1. M1: Zod validation at IPC boundaries; structured logging foundation.
-2. M3: `PathGuard` applied to workspace reads/writes and all agent file tools; tool
-   registry with permission levels.
+2. M3 (complete): `PathGuard` applied to workspace reads/writes and agent file tools;
+   tool registry with permission levels and lifecycle/budget limits.
 3. M4: command policy, worktree containment, diff/conflict detection.
 4. M7: approval manager, exact-action hashing, audit trail, controlled merge.
 5. M8: approval center UI exposes decisions and audit history.

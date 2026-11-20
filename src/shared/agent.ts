@@ -13,6 +13,23 @@
  */
 
 export type AgentId = 'opencode' | 'codex' | 'gemini'
+export type ProviderId = string
+
+export interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  costEstimate?: number
+}
+
+export interface AgentEventContext {
+  providerId: ProviderId
+  agentId?: string
+  workflowId?: string
+  taskId?: string
+  correlationId?: string
+}
 
 export interface AgentCapabilities {
   streaming: boolean
@@ -27,6 +44,7 @@ export type AuthState = 'authenticated' | 'unauthenticated' | 'needs_login' | 'e
 
 export interface AgentAuthStatus {
   agentId: AgentId
+  providerId: ProviderId
   state: AuthState
   details?: string
   connectedProviders: string[]
@@ -71,7 +89,7 @@ export interface AgentToolActivity {
   error?: string
 }
 
-export type AgentEvent =
+export type AgentEvent = (
   | {
       type: 'status'
       sessionId: string
@@ -96,6 +114,11 @@ export type AgentEvent =
       changeType: 'created' | 'modified' | 'deleted'
     }
   | {
+      type: 'usage'
+      sessionId: string
+      usage: TokenUsage
+    }
+  | {
       type: 'done'
       sessionId: string
       fullText?: string
@@ -105,10 +128,12 @@ export type AgentEvent =
       sessionId: string
       error: string
     }
+) & AgentEventContext
 
 export interface AgentSession {
   id: string
   agentId: AgentId
+  providerId: ProviderId
   workspacePath: string
   modelId: string
   title?: string

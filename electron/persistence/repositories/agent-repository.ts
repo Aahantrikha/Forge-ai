@@ -75,6 +75,10 @@ export class AgentRepository {
     )
   }
 
+  listAll(): Agent[] {
+    return (this.store.db.prepare('SELECT * FROM agents ORDER BY created_at ASC').all() as AgentRow[]).map(map)
+  }
+
   create(input: CreateAgentInput): Agent {
     const timestamp = now()
     const id = input.id ?? newId()

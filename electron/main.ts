@@ -5,6 +5,12 @@ import { fileURLToPath } from 'node:url'
 import { IpcChannels, type AppInfo } from '../src/shared/ipc'
 import { WorkspaceService } from './workspace'
 import { AgentService } from './agent-service'
+import { OpencodeAdapter } from './agents/opencode'
+import { AgentFactory } from './agents/agent-factory'
+import { AgentRegistry } from './agents/agent-registry'
+import { AgentRuntime } from './agents/agent-runtime'
+import { ModelGateway } from './models/model-gateway'
+import { ProviderRegistry } from './models/provider-registry'
 import { createForgeContext, disposeForgeContext } from './context'
 import { IpcArgs, validateArgs } from './ipc/validation'
 
@@ -68,7 +74,27 @@ const workspaceService = new WorkspaceService({
       parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options),
   },
 })
-const agentService = new AgentService(() => win)
+const modelGateway = new ModelGateway(
+  new ProviderRegistry(),
+  forge.repositories.modelSessions,
+  forge.events,
+  forge.logger
+)
+modelGateway.getRegistry().register(new OpencodeAdapter((event) => modelGateway.ingestProviderEvent(event)))
+const agentService = new AgentService(() => win, modelGateway)
+modelGateway.setEventSink((event) => agentService.broadcastEvent(event))
+const agentRegistry = new AgentRegistry()
+const agentFactory = new AgentFactory(forge.repositories, modelGateway, forge.events, forge.logger)
+const agentRuntime = new AgentRuntime(
+  forge.repositories,
+  agentRegistry,
+  agentFactory,
+  modelGateway,
+  forge.events,
+  forge.logger
+)
+const heartbeatSweep = setInterval(() => agentRuntime.sweepStale(), 30_000)
+forge.events.on('*', (event) => win?.webContents.send(IpcChannels.forgeEvent, event))
 
 function registerIpcHandlers() {
   // Application info (used by the settings screen + status bar).
@@ -138,6 +164,38 @@ function registerIpcHandlers() {
   ipcMain.handle(IpcChannels.agentCancel, (_event, ...args: unknown[]) => {
     const [agentId, sessionId, workspacePath] = validateArgs(IpcArgs.cancel, args, IpcChannels.agentCancel)
     return agentService.cancel(agentId, sessionId, workspacePath)
+  })
+
+  // Dynamic agent runtime channels — every argument is validated at the trust boundary.
+  ipcMain.handle(IpcChannels.agentSpawn, (_event, ...args: unknown[]) => {
+    const [request] = validateArgs(IpcArgs.agentSpawn, args, IpcChannels.agentSpawn)
+    return agentRuntime.spawn(request)
+  })
+  ipcMain.handle(IpcChannels.agentList, (_event, ...args: unknown[]) => {
+    const [workflowId] = validateArgs(IpcArgs.agentList, args, IpcChannels.agentList)
+    return agentRuntime.list(workflowId)
+  })
+  ipcMain.handle(IpcChannels.agentInspect, (_event, ...args: unknown[]) => {
+    const [agentId] = validateArgs(IpcArgs.agentInspect, args, IpcChannels.agentInspect)
+    return agentRuntime.get(agentId)
+  })
+  ipcMain.handle(IpcChannels.agentExecute, (_event, ...args: unknown[]) => {
+    const [agentId, prompt] = validateArgs(IpcArgs.agentExecute, args, IpcChannels.agentExecute)
+    return agentRuntime.execute(agentId, prompt)
+  })
+  ipcMain.handle(IpcChannels.agentTerminate, (_event, ...args: unknown[]) => {
+    const [agentId] = validateArgs(IpcArgs.agentTerminate, args, IpcChannels.agentTerminate)
+    return agentRuntime.terminate(agentId)
+  })
+
+  // Model gateway channels — provider catalog and persisted usage.
+  ipcMain.handle(IpcChannels.modelList, (_event, ...args: unknown[]) => {
+    const [providerId] = validateArgs(IpcArgs.modelList, args, IpcChannels.modelList)
+    return modelGateway.listModels(providerId)
+  })
+  ipcMain.handle(IpcChannels.modelUsage, (_event, ...args: unknown[]) => {
+    const [workflowId] = validateArgs(IpcArgs.modelUsage, args, IpcChannels.modelUsage)
+    return modelGateway.getUsage(workflowId)
   })
 }
 
@@ -295,6 +353,7 @@ function createWindow() {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
+  clearInterval(heartbeatSweep)
   workspaceService.dispose()
   void agentService.dispose()
   disposeForgeContext(forge)

@@ -47,6 +47,39 @@ export const FilesystemPermissionsSchema = z.object({
   writableOwnership: z.array(z.string()),
 })
 
+export const AgentRoleSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z][a-z0-9-]*$/, 'Role must use lowercase letters, numbers and hyphens.')
+
+export const RoleProfileSchema = z.object({
+  role: AgentRoleSchema,
+  description: z.string().min(1),
+  systemInstructions: z.string().min(1),
+  allowedTools: z.array(ToolNameSchema).min(1),
+  filesystemPermissions: FilesystemPermissionsSchema,
+  defaultModelConfig: ModelConfigSchema,
+  executionLimits: ExecutionLimitsSchema,
+})
+
+export type AgentRole = z.infer<typeof AgentRoleSchema>
+export type RoleProfile = z.infer<typeof RoleProfileSchema>
+
+export const SpawnAgentRequestSchema = z.object({
+  workflowId: WorkflowIdSchema,
+  role: AgentRoleSchema,
+  objective: z.string().min(1),
+  taskId: z.string().min(1).optional(),
+  parentAgentId: z.string().min(1).optional(),
+  workingDirectory: z.string().min(1),
+  modelConfig: ModelConfigSchema.optional(),
+  executionLimits: ExecutionLimitsSchema.partial().optional(),
+  dynamicProfile: RoleProfileSchema.omit({ role: true }).optional(),
+})
+
+export type SpawnAgentRequest = z.infer<typeof SpawnAgentRequestSchema>
+
 export const AgentSchema = z.object({
   id: AgentIdSchema,
   workflowId: WorkflowIdSchema,

@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { IpcChannels } from '../src/shared/ipc'
+import { PathGuard, PathGuardError } from './security/path-guard'
 import type {
   FileChangeEvent,
   FileState,
@@ -164,31 +165,22 @@ export class WorkspaceService {
   }
 
   private containedPath(targetPath: string): string {
-    const root = this.rootPath()
-    const resolved = path.resolve(targetPath)
-    const realRoot = fs.realpathSync.native(root)
-    let cursor = resolved
-    while (!fs.existsSync(cursor)) {
-      const parent = path.dirname(cursor)
-      if (parent === cursor) break
-      cursor = parent
+    try {
+      return new PathGuard(this.rootPath()).resolve(targetPath)
+    } catch (error) {
+      if (error instanceof PathGuardError) {
+        if (error.code === 'PATH_NOT_FOUND') {
+          throw new WorkspaceServiceError('NOT_FOUND', error.message, { path: error.details.path })
+        }
+        if (error.code === 'PATH_OUTSIDE_WORKSPACE') {
+          throw new WorkspaceServiceError('PATH_OUTSIDE_WORKSPACE', 'Path is outside the selected workspace.', {
+            path: error.details.path,
+          })
+        }
+        throw new WorkspaceServiceError('INVALID_TARGET', error.message, { path: error.details.path })
+      }
+      throw error
     }
-
-    if (!fs.existsSync(cursor)) {
-      throw new WorkspaceServiceError('NOT_FOUND', 'Path does not exist.', { path: resolved })
-    }
-
-    const realCursor = fs.realpathSync.native(cursor)
-    const suffix = path.relative(cursor, resolved)
-    const candidate = suffix ? path.join(realCursor, suffix) : realCursor
-    const relative = path.relative(realRoot, candidate)
-    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-      throw new WorkspaceServiceError('PATH_OUTSIDE_WORKSPACE', 'Path is outside the selected workspace.', {
-        path: resolved,
-      })
-    }
-
-    return candidate
   }
 
   private validateName(rawName: string): string {

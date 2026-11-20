@@ -19,6 +19,7 @@ interface ActivityRailProps {
   onSelect: (view: ViewId) => void
   /** Global "new chat" action from the rail. */
   onNewChat: () => void
+  newChatDisabled?: boolean
   /** Trigger native folder picker */
   onOpenFolder: () => void
 }
@@ -29,6 +30,7 @@ export function ActivityRail({
   workspace,
   onSelect,
   onNewChat,
+  newChatDisabled = false,
   onOpenFolder,
 }: ActivityRailProps) {
   const handleClick = (id: ViewId) => {
@@ -42,7 +44,7 @@ export function ActivityRail({
 
   return (
     <nav className="activity-rail" aria-label="Primary">
-      <button type="button" className="rail-item" onClick={onNewChat} title="New chat" aria-label="New chat">
+      <button type="button" className="rail-item" onClick={onNewChat} disabled={newChatDisabled} title="New chat" aria-label="New chat">
         <PlusIcon size={19} />
       </button>
       <div className="rail-separator" role="presentation" />

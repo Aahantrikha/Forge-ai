@@ -7,7 +7,7 @@ Zero-cost models are the default; paid providers are opt-in.
 
 Stack: Electron + React + TypeScript (Vite).
 
-## Status — M1 foundation complete, M2 model gateway next
+## Status — M3 agent runtime complete, M4 local execution next
 
 The current release is the working single-agent baseline plus the new foundation:
 
@@ -22,9 +22,16 @@ The current release is the working single-agent baseline plus the new foundation
   migrations and 12 repositories, a durable typed event bus, structured logging and
   validated IPC arguments (`src/shared/domain`, `electron/persistence`,
   `electron/coordination`, `electron/ipc/validation.ts`).
+- **Model gateway**: provider-neutral `ProviderAdapter` registry and `ModelGateway` with
+  independent persisted sessions, real OpenCode streaming/cancel, timeout/retry, token
+  usage accounting, enriched events and typed model IPC (`electron/models`).
+- **Agent runtime**: validated role profiles, dynamic role manifests, `AgentFactory`,
+  `AgentRegistry`, `AgentRuntime`, scoped `ToolRegistry`, `PathGuard`, lifecycle/heartbeat
+  sweeps, concurrency/recursion/token budgets and typed agent IPC (`electron/agents`,
+  `electron/security`).
 
 The platform transformation is planned in milestones M0–M8 in `IMPLEMENTATION_PLAN.md`:
-M0 audit (complete) → M1 persistence/foundation (complete) → M2 model gateway → M3 agent runtime →
+M0 audit (complete) → M1 persistence/foundation (complete) → M2 model gateway (complete) → M3 agent runtime (complete) →
 M4 worktree execution → M5 orchestration → M6 coordination → M7 verification/approvals →
 M8 Agent Workspace. See `ARCHITECTURE.md` for the target design.
 

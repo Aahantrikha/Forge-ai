@@ -75,6 +75,16 @@ export class ModelSessionRepository {
     ).map(map)
   }
 
+  listByWorkflow(workflowId: string): ModelSession[] {
+    return (
+      this.store.db.prepare('SELECT * FROM model_sessions WHERE workflow_id = ? ORDER BY created_at ASC').all(workflowId) as SessionRow[]
+    ).map(map)
+  }
+
+  listAll(): ModelSession[] {
+    return (this.store.db.prepare('SELECT * FROM model_sessions ORDER BY created_at ASC').all() as SessionRow[]).map(map)
+  }
+
   updateUsage(id: string, usage: Partial<Pick<ModelSession, 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens' | 'costEstimate'>>): void {
     const columns: Record<string, string> = {
       inputTokens: 'input_tokens',

@@ -115,4 +115,30 @@ describe('IPC argument validation', () => {
       validateArgs(IpcArgs.submitPrompt, ['opencode', { sessionId: 's', prompt: '' }], 'forge:agent:submit-prompt')
     ).toThrow(IpcValidationError)
   })
+
+  it('accepts optional model gateway arguments', () => {
+    expect(validateArgs(IpcArgs.modelList, [], 'forge:model:list')).toEqual([])
+    expect(validateArgs(IpcArgs.modelUsage, ['workflow-1'], 'forge:model:usage')).toEqual(['workflow-1'])
+  })
+
+  it('rejects invalid model provider ids', () => {
+    expect(() => validateArgs(IpcArgs.modelList, ['unknown'], 'forge:model:list')).toThrow(IpcValidationError)
+  })
+
+  it('validates dynamic agent spawn requests', () => {
+    const request = {
+      workflowId: 'wf-1',
+      role: 'research',
+      objective: 'Inspect the repository',
+      workingDirectory: '/workspace',
+    }
+    const parsed = validateArgs(IpcArgs.agentSpawn, [request], 'forge:agent:spawn')
+    expect(parsed[0].role).toBe('research')
+
+    const { objective: _objective, ...missingObjective } = request
+    void _objective
+    expect(() => validateArgs(IpcArgs.agentSpawn, [missingObjective], 'forge:agent:spawn')).toThrow(
+      IpcValidationError
+    )
+  })
 })

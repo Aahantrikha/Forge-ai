@@ -1,4 +1,5 @@
 import type { ViewId } from '../app/navigation'
+import type { AgentSession } from '../shared/agent'
 import type { FileTreeNode, OpenedFile, WorkspaceEntry, WorkspaceInfo, WorkspaceResult } from '../shared/workspace'
 import { ChatSidebar } from '../views/ChatView'
 import { HistorySidebar } from '../views/HistoryView'
@@ -13,6 +14,8 @@ interface SidebarProps {
   loading: boolean
   /** Passed through to sidebars that need the global new-chat action. */
   onNewChat: () => void
+  activeSession: AgentSession | null
+  newChatDisabled: boolean
   onOpenFolder: () => Promise<void>
   onOpenFile: () => Promise<void>
   onSelectFile: (node: FileTreeNode) => Promise<void>
@@ -30,6 +33,8 @@ export function Sidebar({
   tree,
   activeFile,
   loading,
+  activeSession,
+  newChatDisabled,
   onNewChat,
   onOpenFolder,
   onOpenFile,
@@ -43,7 +48,7 @@ export function Sidebar({
   return (
     <div className="sidebar">
       {view === 'chat' ? (
-        <ChatSidebar onNewChat={onNewChat} />
+        <ChatSidebar onNewChat={onNewChat} activeSession={activeSession} newChatDisabled={newChatDisabled} />
       ) : view === 'workspace' ? (
         <WorkspaceSidebar
           workspace={workspace}

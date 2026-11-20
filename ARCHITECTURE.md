@@ -58,14 +58,16 @@ Absent from the baseline: any database, Git/worktree logic, terminal/PTY, approv
 permission system, orchestration, agent-to-agent messaging, shared context, artifacts,
 workflow state, Zod validation, structured logging and tests.
 
-Known baseline defects to remediate before agent execution is enabled:
+Known baseline defects and their remediation status:
 
-1. `readFile()` and `saveFile()` accept arbitrary paths from IPC with no containment
-   check; only `getTree()` enforces workspace containment.
-2. `AgentEvent` carries `sessionId` but no `agentId`; the renderer ignores `sessionId`,
-   so events cannot be attributed correctly under concurrency.
-3. `AgentId` conflates provider identity with agent identity.
-4. Chat state is transient and lost on view switches; there is no persistence layer.
+1. `readFile()` and `saveFile()` now use realpath-aware workspace containment through the
+   reusable `PathGuard` in `electron/security/path-guard.ts` (M3 complete).
+2. `AgentEvent` now carries `providerId`, `agentId`, `workflowId`, `taskId` and
+   `correlationId` from `ModelGateway`; the legacy chat renderer still needs concurrency
+   attribution work in M3/M8.
+3. `AgentId` still names legacy provider keys, but `ModelGateway` uses a separate
+   `ProviderId` and treats dynamic `agentId` as event/persistence context.
+4. Chat state remains transient; M1 added the persistence layer and M8 will migrate the UI.
 
 ## 4. Target architecture
 

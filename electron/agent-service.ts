@@ -1,7 +1,6 @@
 import type { BrowserWindow } from 'electron'
 import { IpcChannels } from '../src/shared/ipc'
 import type {
-  AgentAdapter,
   AgentAuthStatus,
   AgentEvent,
   AgentId,
@@ -10,94 +9,87 @@ import type {
   CreateSessionOptions,
   SubmitPromptOptions,
 } from '../src/shared/agent'
-import { OpencodeAdapter } from './agents/opencode'
+import type { GatewaySession, ModelGateway } from './models/model-gateway'
 
-/**
- * Main-process service managing AI coding agent adapters.
- * Dispatches commands to the appropriate provider adapter and streams events to the renderer.
- */
 export class AgentService {
-  private adapters = new Map<AgentId, AgentAdapter>()
-  private getWindow: () => BrowserWindow | null
+  private readonly getWindow: () => BrowserWindow | null
+  private readonly gateway: ModelGateway
 
-  constructor(getWindow: () => BrowserWindow | null) {
+  constructor(getWindow: () => BrowserWindow | null, gateway: ModelGateway) {
     this.getWindow = getWindow
-
-    // Initialize OpenCode adapter (Milestone 3)
-    const opencodeAdapter = new OpencodeAdapter((event: AgentEvent) => {
-      this.broadcastEvent(event)
-    })
-    this.adapters.set('opencode', opencodeAdapter)
+    this.gateway = gateway
   }
 
-  private broadcastEvent(event: AgentEvent) {
+  broadcastEvent(event: AgentEvent): void {
     const win = this.getWindow()
     if (win && !win.isDestroyed()) {
       win.webContents.send(IpcChannels.agentEvent, event)
     }
   }
 
-  private getAdapter(agentId: AgentId): AgentAdapter | null {
-    return this.adapters.get(agentId) ?? null
-  }
-
   async checkAuth(agentId: AgentId): Promise<AgentAuthStatus> {
-    const adapter = this.getAdapter(agentId)
-    if (adapter) {
-      return adapter.checkAuth()
-    }
-
-    // Honest status for future milestones (Forge AI Spec §12)
-    const milestone = agentId === 'codex' ? 'Milestone 4' : 'Milestone 5'
-    const name = agentId === 'codex' ? 'OpenAI Codex' : 'Gemini via Antigravity CLI'
-    return {
-      agentId,
-      state: 'unauthenticated',
-      connectedProviders: [],
-      details: `${name} adapter is scheduled for ${milestone}. No simulated credentials or fake activity.`,
-      loginMethod: 'none',
+    try {
+      return await this.gateway.checkAuth(agentId)
+    } catch {
+      const milestone = agentId === 'codex' ? 'Milestone 4' : 'Milestone 5'
+      const name = agentId === 'codex' ? 'OpenAI Codex' : 'Gemini via Antigravity CLI'
+      return {
+        agentId,
+        providerId: agentId,
+        state: 'unauthenticated',
+        connectedProviders: [],
+        details: `${name} adapter is scheduled for ${milestone}. No simulated credentials or fake activity.`,
+        loginMethod: 'none',
+      }
     }
   }
 
   async listModels(agentId: AgentId): Promise<AgentModel[]> {
-    const adapter = this.getAdapter(agentId)
-    if (adapter) {
-      return adapter.listModels()
+    try {
+      const catalogs = await this.gateway.listModels(agentId)
+      return catalogs.flatMap((catalog) => catalog.models)
+    } catch {
+      return []
     }
-    return []
   }
 
   async createSession(agentId: AgentId, options: CreateSessionOptions): Promise<AgentSession> {
-    const adapter = this.getAdapter(agentId)
-    if (!adapter) {
-      throw new Error(`Agent adapter for "${agentId}" is not implemented yet.`)
-    }
-    return adapter.createSession(options)
+    const session = await this.gateway.createSession({
+      providerId: agentId,
+      workspacePath: options.workspacePath,
+      modelId: options.modelId,
+      title: options.title,
+    })
+    return this.toAgentSession(session)
   }
 
   async submitPrompt(agentId: AgentId, options: SubmitPromptOptions): Promise<void> {
-    const adapter = this.getAdapter(agentId)
-    if (!adapter) {
-      throw new Error(`Agent adapter for "${agentId}" is not implemented yet.`)
-    }
-    return adapter.submitPrompt(options)
+    await this.gateway.submitPrompt({
+      providerId: agentId,
+      sessionId: options.sessionId,
+      prompt: options.prompt,
+      modelId: options.modelId,
+      workspacePath: options.workspacePath,
+    })
   }
 
   async cancel(agentId: AgentId, sessionId: string, workspacePath?: string): Promise<void> {
-    const adapter = this.getAdapter(agentId)
-    if (adapter) {
-      await adapter.cancel(sessionId, workspacePath)
-    }
+    await this.gateway.cancel(sessionId, agentId)
+    void workspacePath
   }
 
   async dispose(): Promise<void> {
-    for (const adapter of this.adapters.values()) {
-      try {
-        await adapter.dispose()
-      } catch {
-        // Ignore during shutdown
-      }
+    await this.gateway.dispose()
+  }
+
+  private toAgentSession(session: GatewaySession): AgentSession {
+    return {
+      id: session.providerSessionId,
+      agentId: session.providerId as AgentId,
+      providerId: session.providerId,
+      workspacePath: session.workspacePath,
+      modelId: session.modelId,
+      createdAt: session.record.createdAt,
     }
-    this.adapters.clear()
   }
 }

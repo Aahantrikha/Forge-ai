@@ -20,6 +20,7 @@ import type {
   AgentModel,
   AgentSession,
   CreateSessionOptions,
+  ProviderId,
   SubmitPromptOptions,
 } from './agent'
 import type {
@@ -32,6 +33,8 @@ import type {
   WorkspaceOpenResult,
   WorkspaceResult,
 } from './workspace'
+import type { ModelCatalogEntry, ModelUsageSummary } from './model'
+import type { Agent, ForgeEvent, SpawnAgentRequest } from './domain'
 
 export type {
   AgentAuthStatus,
@@ -44,7 +47,9 @@ export type {
   AgentToolActivity,
   AuthState,
   CreateSessionOptions,
+  ProviderId,
   SubmitPromptOptions,
+  TokenUsage,
   ToolType,
 } from './agent'
 
@@ -59,6 +64,10 @@ export type {
   WorkspaceOpenResult,
   WorkspaceResult,
 } from './workspace'
+
+export type { ModelCatalogEntry, ModelUsageSummary } from './model'
+export type { ForgeError, ForgeErrorCode } from './errors'
+export type { Agent, AgentRole, ForgeEvent, RoleProfile, SpawnAgentRequest } from './domain'
 
 /** Whitelisted channel names. Every value is used by an explicit handler. */
 export const IpcChannels = {
@@ -91,6 +100,18 @@ export const IpcChannels = {
   agentSubmitPrompt: 'forge:agent:submit-prompt',
   agentCancel: 'forge:agent:cancel',
   agentEvent: 'forge:agent:event',
+
+  // Agent runtime channels (Milestone 3)
+  agentSpawn: 'forge:agent:spawn',
+  agentList: 'forge:agent:list',
+  agentInspect: 'forge:agent:inspect',
+  agentExecute: 'forge:agent:execute',
+  agentTerminate: 'forge:agent:terminate',
+  forgeEvent: 'forge:event',
+
+  // Model gateway channels (Milestone 2)
+  modelList: 'forge:model:list',
+  modelUsage: 'forge:model:usage',
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -147,7 +168,21 @@ export interface ForgeApi {
     createSession(agentId: AgentId, options: CreateSessionOptions): Promise<AgentSession>
     submitPrompt(agentId: AgentId, options: SubmitPromptOptions): Promise<void>
     cancel(agentId: AgentId, sessionId: string, workspacePath?: string): Promise<void>
-    /** Subscribe to agent events (text deltas, real tool activity, file changes, done, error). */
+    /** Subscribe to provider-level events (text deltas, tool activity, file changes, usage, done, error). */
     onEvent(listener: (event: AgentEvent) => void): () => void
+    /** Spawn a dynamic agent with an independent model session. */
+    spawn(request: SpawnAgentRequest): Promise<Agent>
+    list(workflowId: string): Promise<Agent[]>
+    inspect(agentId: AgentId): Promise<Agent | null>
+    execute(agentId: AgentId, prompt: string): Promise<Agent>
+    terminate(agentId: AgentId): Promise<Agent>
+  }
+  model: {
+    list(providerId?: ProviderId): Promise<ModelCatalogEntry[]>
+    usage(workflowId?: string): Promise<ModelUsageSummary>
+  }
+  events: {
+    /** Subscribe to durable, enriched Forge domain events from the main process. */
+    onForgeEvent(listener: (event: ForgeEvent) => void): () => void
   }
 }

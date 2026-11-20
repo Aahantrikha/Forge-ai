@@ -11,10 +11,13 @@
   --bg-raised: #1a1e25;
   --bg-hover: #222832;
   --bg-active: #28303c;
+  --bg-floating: #1a1e25;
 
   /* Lines & text */
   --border: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.14);
+  --border-hover: rgba(255, 255, 255, 0.2);
+  --border-active: rgba(255, 255, 255, 0.24);
   --text-primary: #e8eaee;
   --text-secondary: #97a0ac;
   --text-muted: #5f6773;
@@ -35,6 +38,9 @@
 
   --font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-mono: 'Cascadia Code', 'Consolas', 'JetBrains Mono', monospace;
+
+  --duration-fast: 120ms;
+  --ease-standard: ease;
 }
 
 /* ---------- reset ---------- */
@@ -184,6 +190,7 @@ button, textarea, input { font: inherit; color: inherit; }
   position: relative;
 }
 .rail-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.rail-item:disabled { opacity: 0.5; cursor: not-allowed; }
 .rail-item.active {
   background: var(--accent-soft);
   color: var(--accent);
@@ -261,6 +268,7 @@ button, textarea, input { font: inherit; color: inherit; }
 }
 .view-header {
   flex: none;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -392,7 +400,7 @@ button, textarea, input { font: inherit; color: inherit; }
 /* ==========================================================================
    Chat view
    ========================================================================== */
-.agent-picker { position: relative; margin-left: auto; }
+.agent-picker { position: relative; min-width: 0; }
 .picker-btn {
   display: inline-flex;
   align-items: center;
@@ -1371,6 +1379,8 @@ button, textarea, input { font: inherit; color: inherit; }
 
 /* Model Picker in Header */
 .model-picker-wrap {
+  min-width: 0;
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1378,12 +1388,15 @@ button, textarea, input { font: inherit; color: inherit; }
 
 .model-picker {
   position: relative;
+  min-width: 0;
 }
 
 .model-btn {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  min-width: 0;
+  max-width: 220px;
   height: 28px;
   padding: 0 10px;
   background: var(--bg-panel);
@@ -1400,6 +1413,13 @@ button, textarea, input { font: inherit; color: inherit; }
   border-color: var(--border-hover);
 }
 
+.model-btn-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .model-dropdown {
   position: absolute;
   top: calc(100% + 4px);
@@ -1407,8 +1427,8 @@ button, textarea, input { font: inherit; color: inherit; }
   width: 290px;
   max-height: 380px;
   overflow-y: auto;
-  background: var(--bg-floating);
-  border: 1px solid var(--border-active);
+  background: var(--bg-floating, var(--bg-raised));
+  border: 1px solid var(--border-active, var(--border-strong));
   border-radius: var(--radius-md);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   z-index: 50;

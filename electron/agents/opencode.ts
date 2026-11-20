@@ -5,17 +5,23 @@ import {
   type OpencodeClient,
 } from '@opencode-ai/sdk'
 import type {
-  AgentAdapter,
   AgentAuthStatus,
   AgentCapabilities,
   AgentEvent,
   AgentModel,
-  AgentSession,
   AgentToolActivity,
-  CreateSessionOptions,
-  SubmitPromptOptions,
   ToolType,
 } from '../../src/shared/agent'
+import type {
+  ProviderAdapter,
+  ProviderCreateSessionOptions,
+  ProviderSession,
+  ProviderSubmitPromptOptions,
+} from '../models/provider-adapter'
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
+
+type OpenCodeEvent = DistributiveOmit<AgentEvent, 'providerId'>
 
 /**
  * OpenCode Agent Adapter (Forge AI Milestone 3).
@@ -26,7 +32,7 @@ import type {
  * - Detects and clearly marks free models vs paid models (Forge AI Spec §1, §11).
  * - Never fabricates agent activity (Forge AI Spec §5).
  */
-export class OpencodeAdapter implements AgentAdapter {
+export class OpencodeAdapter implements ProviderAdapter {
   readonly id = 'opencode' as const
 
   readonly capabilities: AgentCapabilities = {
@@ -47,6 +53,10 @@ export class OpencodeAdapter implements AgentAdapter {
   constructor(onEvent: (event: AgentEvent) => void) {
     this.onEventCallback = onEvent
     this.ensureBinPath()
+  }
+
+  private emit(event: OpenCodeEvent): void {
+    this.onEventCallback({ ...event, providerId: 'opencode' })
   }
 
   /** Ensure node_modules/.bin is on process.env.PATH so cross-spawn finds opencode */
@@ -153,9 +163,32 @@ export class OpencodeAdapter implements AgentAdapter {
       : {}) as Record<string, unknown>
 
     switch (type) {
+      case 'message.updated': {
+        const info = props.info as Record<string, unknown> | undefined
+        if (info && info.role === 'assistant') {
+          const tokens = info.tokens as Record<string, unknown> | undefined
+          const cache = tokens?.cache as Record<string, unknown> | undefined
+          const sessionId = String(info.sessionID || props.sessionID || '')
+          if (sessionId) {
+            this.emit({
+              type: 'usage',
+              sessionId,
+              usage: {
+                inputTokens: Number(tokens?.input ?? 0),
+                outputTokens: Number(tokens?.output ?? 0),
+                cacheReadTokens: Number(cache?.read ?? 0),
+                cacheWriteTokens: Number(cache?.write ?? 0),
+                costEstimate: Number(info.cost ?? 0),
+              },
+            })
+          }
+        }
+        break
+      }
+
       case 'message.part.delta': {
         if (props.sessionID && props.delta) {
-          this.onEventCallback({
+          this.emit({
             type: 'text_delta',
             sessionId: String(props.sessionID),
             messageId: String(props.messageID || ''),
@@ -187,7 +220,7 @@ export class OpencodeAdapter implements AgentAdapter {
             error: state?.error ? String(state.error) : undefined,
           }
 
-          this.onEventCallback({
+          this.emit({
             type: 'tool_activity',
             sessionId: String(props.sessionID || part.sessionID || ''),
             activity,
@@ -199,13 +232,13 @@ export class OpencodeAdapter implements AgentAdapter {
       case 'file.edited': {
         if (props.file) {
           const filePath = String(props.file)
-          this.onEventCallback({
+          this.emit({
             type: 'file_change',
             sessionId: String(props.sessionID || ''),
             path: filePath,
             changeType: 'modified',
           })
-          this.onEventCallback({
+          this.emit({
             type: 'tool_activity',
             sessionId: String(props.sessionID || ''),
             activity: {
@@ -223,7 +256,7 @@ export class OpencodeAdapter implements AgentAdapter {
 
       case 'command.executed': {
         if (props.name) {
-          this.onEventCallback({
+          this.emit({
             type: 'tool_activity',
             sessionId: String(props.sessionID || ''),
             activity: {
@@ -244,18 +277,18 @@ export class OpencodeAdapter implements AgentAdapter {
         const statusType = statusObj?.type
         if (props.sessionID) {
           if (statusType === 'busy') {
-            this.onEventCallback({
+            this.emit({
               type: 'status',
               sessionId: String(props.sessionID),
               status: 'generating',
             })
           } else if (statusType === 'idle') {
-            this.onEventCallback({
+            this.emit({
               type: 'status',
               sessionId: String(props.sessionID),
               status: 'idle',
             })
-            this.onEventCallback({
+            this.emit({
               type: 'done',
               sessionId: String(props.sessionID),
             })
@@ -266,7 +299,7 @@ export class OpencodeAdapter implements AgentAdapter {
 
       case 'session.error': {
         if (props.sessionID) {
-          this.onEventCallback({
+          this.emit({
             type: 'error',
             sessionId: String(props.sessionID),
             error: props.error ? (typeof props.error === 'object' ? JSON.stringify(props.error) : String(props.error)) : 'Unknown session error',
@@ -312,6 +345,7 @@ export class OpencodeAdapter implements AgentAdapter {
 
       return {
         agentId: 'opencode',
+        providerId: 'opencode',
         state: 'authenticated',
         connectedProviders: connected,
         details: 'Connected to local OpenCode engine. Built-in free community models are active with no API billing.',
@@ -320,6 +354,7 @@ export class OpencodeAdapter implements AgentAdapter {
     } catch (err) {
       return {
         agentId: 'opencode',
+        providerId: 'opencode',
         state: 'error',
         connectedProviders: [],
         details: `Unable to connect to OpenCode engine: ${err instanceof Error ? err.message : String(err)}`,
@@ -380,7 +415,7 @@ export class OpencodeAdapter implements AgentAdapter {
     return results
   }
 
-  async createSession(options: CreateSessionOptions): Promise<AgentSession> {
+  async createSession(options: ProviderCreateSessionOptions): Promise<ProviderSession> {
     const { client } = await this.ensureServer()
     await this.ensureEventStream(options.workspacePath)
 
@@ -400,6 +435,7 @@ export class OpencodeAdapter implements AgentAdapter {
     return {
       id: res.data.id,
       agentId: 'opencode',
+      providerId: 'opencode',
       workspacePath: options.workspacePath,
       modelId: options.modelId || 'opencode/big-pickle',
       title: res.data.title || options.title,
@@ -407,7 +443,7 @@ export class OpencodeAdapter implements AgentAdapter {
     }
   }
 
-  async submitPrompt(options: SubmitPromptOptions): Promise<void> {
+  async submitPrompt(options: ProviderSubmitPromptOptions): Promise<void> {
     const { client } = await this.ensureServer()
     await this.ensureEventStream(options.workspacePath)
 
@@ -420,7 +456,7 @@ export class OpencodeAdapter implements AgentAdapter {
       modelID = parts.slice(1).join('/')
     }
 
-    this.onEventCallback({
+    this.emit({
       type: 'status',
       sessionId: options.sessionId,
       status: 'generating',
@@ -445,7 +481,7 @@ export class OpencodeAdapter implements AgentAdapter {
         },
       })
     } catch (err) {
-      this.onEventCallback({
+      this.emit({
         type: 'error',
         sessionId: options.sessionId,
         error: `Prompt failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -461,7 +497,7 @@ export class OpencodeAdapter implements AgentAdapter {
         path: { id: sessionId },
         query: workspacePath ? { directory: workspacePath } : undefined,
       })
-      this.onEventCallback({
+      this.emit({
         type: 'status',
         sessionId,
         status: 'aborted',
